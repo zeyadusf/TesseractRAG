@@ -18,8 +18,14 @@ import shutil
 from fastapi import HTTPException
 
 from app.models.session import SessionResponse
-from app.config import get_settings
+from app.config import get_settings as _config
 from app.utils.logger import get_logger
+
+from app.core.ingestion.parser import DocumentParser
+from app.core.ingestion.chunker import RecursiveChunker
+from app.core.ingestion.indexer import FAISSIndexer
+from app.core.ingestion.embedder import Embedder
+from app.core.retrieval.bm25_retriever import BM25Retriever
 
 logger = get_logger(__name__)
 
@@ -117,7 +123,7 @@ class SessionManager:
         # In-memory store: session_id (str) → SessionState
         # Dict chosen over list for O(1) lookup by ID
         self._sessions: dict[str, SessionState] = {}
-        self.data_dir: str = get_settings().DATA_DIR
+        self.data_dir: str = _config().DATA_DIR
 
         # Reload any sessions persisted from previous backend runs
         self._load_persisted_sessions()
@@ -292,6 +298,42 @@ class SessionManager:
         del self._sessions[session_id]                # then remove from memory
         logger.info(f"Deleted session {session_id[:8]}...")
 
+    # ــــــــ ingestion pipeline ─────────────────────────────────────────────
+
+    def ingest_document(self, session_id: str, file_bytes: bytes, filename: str) -> int:
+    # 1. get_session(session_id)           — raises 404 if not found
+        session = self.get_session(session_id)
+    # 2. DocumentParser().parse()          — extract text
+        try:
+            doc = DocumentParser().parse(file_bytes,filename)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    # 3. RecursiveChunker().split()        — split into chunk dicts
+        chunks = RecursiveChunker(chunk_size=_config().CHUNK_SIZE,
+                                    chunk_overlap=_config().CHUNK_OVERLAP).split(doc,filename)
+    # 4. Embedder().embed_chunks()         — get vectors
+        vector_doc = Embedder().embed_chunks(chunks=chunks)
+    # 5. If session.faiss_index is None:
+        if session.faiss_index is None:
+        # create FAISSIndexer(dimension)
+            session.faiss_index= FAISSIndexer(vector_doc.shape[1])
+    # 6. session.faiss_index.add(vectors)  — add to FAISS
+        session.faiss_index.add(vector_doc)
+    # 7. session.chunks.extend(new_chunks) — add to master chunk list
+        session.chunks.extend(chunks)
+    # 8. session.bm25_retriever = BM25Retriever()
+        session.bm25_retriever = BM25Retriever()
+    #    session.bm25_retriever.build(session.chunks) — rebuild BM25
+        session.bm25_retriever.build(session.chunks)
+    # 9. session.document_names.append(filename)
+        session.document_names.append(filename)
+    # 10. persist: save faiss index + save chunks json
+        session.faiss_index.save(session.index_path)
+        self._save_metadata(session)
+        with open(session.chunks_path, 'w') as f:
+            json.dump(session.chunks, f)
+    # 11. return len(new_chunks)
+        return len(chunks)
 
 # ── Manual test blocks ─────────────────────────────────────────────────────────
 # Run with: python -m app.core.session_manager (from backend/ directory)
