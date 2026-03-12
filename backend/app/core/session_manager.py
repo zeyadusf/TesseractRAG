@@ -309,8 +309,8 @@ class SessionManager:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     # 3. RecursiveChunker().split()        — split into chunk dicts
-        chunks = RecursiveChunker(chunk_size=_config.CHUNK_SIZE,
-                                    chunk_overlap=_config.CHUNK_OVERLAP).split(doc,filename)
+        chunks = RecursiveChunker(chunk_size=_config().CHUNK_SIZE,
+                                    chunk_overlap=_config().CHUNK_OVERLAP).split(doc,filename)
     # 4. Embedder().embed_chunks()         — get vectors
         vector_doc = Embedder().embed_chunks(chunks=chunks)
     # 5. If session.faiss_index is None:
