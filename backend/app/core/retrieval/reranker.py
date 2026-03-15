@@ -29,6 +29,8 @@ class CrossEncoderReranker:
         scores = outputs.logits.squeeze(-1).tolist()
         scored = zip(chunks, scores)          # pairs each chunk with its score
         sorted_chunks = sorted(scored, key=lambda x: x[1], reverse=True)  # sort by score
-        return [chunk for chunk, score in sorted_chunks[:top_k]]           # return just the dicts
-
+        for chunk, score in sorted_chunks[:top_k]:
+            chunk['relevance_score'] = round(float(score), 4)
+            
+        return [chunk for chunk, score in sorted_chunks[:top_k]]
 

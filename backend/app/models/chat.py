@@ -37,7 +37,7 @@ class SourceChunk(BaseModel):
     document_name: str
     content: str
     chunk_index: int = Field(0, ge=0)
-    relevance_score: float = Field(0.0, ge=0.0, le=1.0)
+    relevance_score: float = 0.0
 
 
 class ChatResponse(BaseModel):
@@ -48,3 +48,4 @@ class ChatResponse(BaseModel):
     sources: list[SourceChunk] = Field(default_factory=list)
     strategy_used: RetrievalStrategy = RetrievalStrategy.AUTO
     retrieval_ms: int = Field(0, ge=0)
+    generate_ms: int = Field(0, ge=0)
