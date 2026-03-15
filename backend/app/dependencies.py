@@ -12,3 +12,22 @@ def get_session_manager() -> SessionManager:
     """
     manager = SessionManager()
     return manager
+
+from app.core.retrieval.reranker import CrossEncoderReranker
+from app.core.ingestion.embedder import Embedder
+from app.core.generation.llm_client import HuggingFaceClient
+
+@lru_cache
+def get_embedder():
+    _embedder = Embedder()
+    return _embedder
+
+@lru_cache
+def get_reranker():
+    _reranker = CrossEncoderReranker()
+    return _reranker
+
+@lru_cache
+def get_llm_client():
+    _llm_client = HuggingFaceClient()
+    return _llm_client

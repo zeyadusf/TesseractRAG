@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     # ── Models ─────────────────────────────────────────
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
     RERANKER_MODEL: str = "BAAI/bge-reranker-base"
-    LLM_MODEL: str = "mistralai/Mistral-7B-Instruct-v0.3"
-
+    # LLM_MODEL: str ="mistralai/Mistral-7B-Instruct-v0.3:hf-inference"
+    LLM_MODEL_1 : str = "meta-llama/Llama-3.1-8B-Instruct"
     # ── Storage ────────────────────────────────────────
     DATA_DIR: str = "./data"
 
@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 64
     FINAL_TOP_K: int = 3
     DIM_FAISS : int = 384
+    # ----
+    MAX_CONTEXT_CHARS : int = 3000 # context length 
 
     model_config = SettingsConfigDict(
         env_file=".env",
