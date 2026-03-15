@@ -1,12 +1,14 @@
 from app.utils.logger import get_logger
+from app.config import get_settings
+
 
 logger = get_logger(__name__)
 
 class RecursiveChunker:
     def __init__(
         self,
-        chunk_size: int = 512,
-        chunk_overlap: int = 64,
+        chunk_size: int = get_settings().CHUNK_SIZE,
+        chunk_overlap: int = get_settings().CHUNK_OVERLAP,
         min_chunk_len: int = 50
     ):
         self.chunk_size = chunk_size

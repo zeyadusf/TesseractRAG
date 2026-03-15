@@ -188,7 +188,7 @@ class SessionManager:
                 session.messages = data["messages"]
 
                 if session.index_path.exists():
-                    session.faiss_index = FAISSIndexer(384)
+                    session.faiss_index = FAISSIndexer(_config().DIM_FAISS)
                     session.faiss_index.load(session.index_path)
 
                 if session.chunks_path.exists():
