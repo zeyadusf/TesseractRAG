@@ -158,14 +158,11 @@ class SessionManager:
 
         Iterates over subdirectories in {data_dir}/sessions/.
         For each directory that contains a valid metadata.json,
-        reconstructs a SessionState and adds it to self._sessions.
-
-        Note: faiss_index and bm25_retriever are left as None after reload.
-        They will be restored when Phase 3 document loading code runs.
+        reconstructs a SessionState, restores FAISS index, chunks,
+        and BM25 retriever, then adds it to self._sessions.
         """
         root_path = Path(self.data_dir) / "sessions"
 
-        # Normal on first ever startup — no sessions exist yet
         if not root_path.exists():
             return
 
@@ -186,15 +183,27 @@ class SessionManager:
                     created_at=datetime.fromisoformat(data["created_at"]),
                     data_dir=self.data_dir,
                 )
-                # Restore document and conversation state
+
                 session.document_names = data["document_names"]
                 session.messages = data["messages"]
+
+                if session.index_path.exists():
+                    session.faiss_index = FAISSIndexer(384)
+                    session.faiss_index.load(session.index_path)
+
+                if session.chunks_path.exists():
+                    with open(session.chunks_path, 'r') as f:
+                        session.chunks = json.load(f)
+
+                if session.chunks:
+                    session.bm25_retriever = BM25Retriever()
+                    session.bm25_retriever.build(session.chunks)
 
                 self._sessions[session.id] = session
 
         logger.info(f"Reloaded {len(self._sessions)} session(s) from disk")
 
-    # ── Public CRUD methods ────────────────────────────────────────────────────
+        # ── Public CRUD methods ────────────────────────────────────────────────────
 
     def create_session(self, name: str, description: Optional[str]) -> SessionResponse:
         """
