@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 64
     FINAL_TOP_K: int = 3
+    DIM_FAISS : int = 384
 
     model_config = SettingsConfigDict(
         env_file=".env",
