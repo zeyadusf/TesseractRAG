@@ -1,3 +1,6 @@
+# venv
+tessRAG/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -205,3 +208,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+ 
+# TesseractRAG 
+# Virtual environment 
+.venv/ 
+tessRAG/ 
+# Secrets — NEVER commit 
+backend/.env 
+# Python cache 
+__pycache__/ 
+*.pyc 
+*.pyo 
+# Runtime data 
+backend/data/sessions/*/ 
+!backend/data/sessions/.gitkeep 
+# ML model cache 
+.cache/ 
+# VS Code 
+.vscode/* 
+!.vscode/settings.json 
