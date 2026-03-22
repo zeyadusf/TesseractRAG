@@ -307,6 +307,32 @@ class SessionManager:
         del self._sessions[session_id]                # then remove from memory
         logger.info(f"Deleted session {session_id[:8]}...")
 
+    def add_message(self, session_id: str, role: str, content: str) -> None:
+        """
+        Append a message to the session conversation history and persist to disk.
+
+        Called twice per chat exchange — once for the user question,
+        once for the assistant answer.
+
+        Args:
+            session_id: UUID of the session.
+            role:       "user" or "assistant".
+            content:    The message text.
+
+        Raises:
+            HTTPException 404: If session_id is not found.
+        """
+        session = self.get_session(session_id)   # raises 404 if not found
+
+        session.messages.append({
+            "role":      role,
+            "content":   content,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        self._save_metadata(session)   # persist to disk immediately
+        logger.info(f"Message saved | session={session_id[:8]}... | role={role}")
+        
     # ــــــــ ingestion pipeline ─────────────────────────────────────────────
 
     def ingest_document(self, session_id: str, file_bytes: bytes, filename: str) -> int:
