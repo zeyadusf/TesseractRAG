@@ -4,18 +4,38 @@ from contextlib import asynccontextmanager
 from app.api.v1 import sessions, documents, chat
 from app.utils.logger import get_logger
 
-logger = get_logger(__name__)
+from app.core.ingestion.embedder import get_embedding_model
+from app.core.retrieval.reranker import get_reranker
+from app.core.session_manager import SessionManager
+from app.dependencies import get_session_manager
 
+logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-	# === STARTUP CODE HERE ===
-	# runs once when server starts
-	logger.info("Tesseract starting...")
-	yield  # server is now running and handling requests"
-	# === SHUTDOWN CODE HERE ===
-	# runs once when server stops
-	logger.info("Tesseract shutting Down...")
+    # ── STARTUP ──────────────────────────────────────
+    logger.info("TesseractRAG starting...")
+
+    # Load embedding model into memory NOW — blocks until ready
+    logger.info("Loading embedding model...")
+    get_embedding_model()
+    logger.info("Embedding model ready ✓")
+
+    # Load reranker model into memory NOW
+    logger.info("Loading reranker model...")
+    get_reranker()
+    logger.info("Reranker model ready ✓")
+
+    # Reload persisted sessions from disk
+    logger.info("Loading persisted sessions...")
+    manager = get_session_manager()
+    logger.info(f"Sessions loaded: {len(manager._sessions)} ✓")
+
+    logger.info("TesseractRAG ready — all models loaded")
+    yield
+
+    # ── SHUTDOWN ─────────────────────────────────────
+    logger.info("TesseractRAG shutting down...")
 
 app = FastAPI(
   lifespan = lifespan,
@@ -52,9 +72,20 @@ app.include_router(
 	tags = ["Documents"]
 )
 
-@app.get("/health", tags=["Health"])
+
+@app.get("/health",tags=["Health"])
 async def health():
-	return {
-			"status": "healthy",
-			"version": "1.0.0"
-	}
+    try:
+        embedder_ready = get_embedding_model() is not None
+        reranker_ready = get_reranker() is not None
+    except Exception:
+        embedder_ready = False
+        reranker_ready = False
+
+    all_ready = embedder_ready and reranker_ready
+    return {
+        "status": "healthy" if all_ready else "loading",
+        "models_ready": all_ready,
+        "embedder": embedder_ready,
+        "reranker": reranker_ready,
+    }

@@ -24,7 +24,8 @@ class HuggingFaceClient:
             "model": self.settings.LLM_MODEL_1,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 512
+            "max_tokens": 512,
+            "top_p" : 0.9,
         }
 
         # Step 2: retry loop — try up to 3 times
