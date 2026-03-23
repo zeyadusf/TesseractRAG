@@ -1,3 +1,6 @@
+from app.core.retrieval.reranker import CrossEncoderReranker
+from app.core.ingestion.embedder import Embedder
+from app.core.generation.llm_client import HuggingFaceClient
 from app.core.session_manager import SessionManager
 from functools import lru_cache
 
@@ -12,10 +15,6 @@ def get_session_manager() -> SessionManager:
     """
     manager = SessionManager()
     return manager
-
-from app.core.retrieval.reranker import CrossEncoderReranker
-from app.core.ingestion.embedder import Embedder
-from app.core.generation.llm_client import HuggingFaceClient
 
 @lru_cache
 def get_embedder():

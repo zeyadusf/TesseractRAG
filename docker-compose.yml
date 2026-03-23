@@ -1,0 +1,39 @@
+# docker-compose.yml
+# ------------------
+# Local development orchestration for TesseractRAG.
+# NOT used in production — Render runs the Dockerfile directly.
+#
+# Usage:
+#   docker-compose up --build    ← first run (builds the image)
+#   docker-compose up            ← subsequent runs (uses cached image)
+#   docker-compose down          ← stop and remove containers
+#   docker-compose logs backend  ← tail backend logs
+
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend      # Docker build context (where Dockerfile lives)
+      dockerfile: Dockerfile
+    container_name: tesseractrag-backend
+    ports:
+      - "8000:8000"           # host:container — access at http://localhost:8000
+    env_file:
+      - ./backend/.env        # load all env vars from your local .env file
+    volumes:
+      # Mount local data/ folder into the container.
+      # Sessions created during local testing persist across container restarts.
+      # Remove this mount when testing R2 to ensure R2 is the real source.
+      - ./backend/data:/app/data
+    healthcheck:
+      # Docker will wait for this to return 200 before marking backend as healthy.
+      # Render uses its own health check — this is only for local compose.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s           # check every 30 seconds
+      timeout: 10s            # fail if no response in 10 seconds
+      retries: 3              # mark unhealthy after 3 consecutive failures
+      start_period: 60s       # give the container 60s to start before first check
+                              # (model loading takes ~10s on first startup)
+    restart: on-failure       # restart if the process crashes, but not on manual stop
