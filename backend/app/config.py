@@ -25,7 +25,8 @@ class Settings(BaseSettings):
 
     # ── Models ─────────────────────────────────────────────────────
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
-    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    # RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     LLM_MODEL_1: str = "meta-llama/Llama-3.1-8B-Instruct"
 
     # ── Chunking ───────────────────────────────────────────────────
