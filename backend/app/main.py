@@ -47,8 +47,11 @@ app = FastAPI(
 app.add_middleware(
 	CORSMiddleware,
 	allow_credentials=True,
-	allow_origins=["*"],
-	allow_methods=["*"],
+    allow_origins=[
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "https://tesseractrag.pages.dev",],	
+    allow_methods=["*"],
 	allow_headers=["*"],
 )
 
