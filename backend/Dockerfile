@@ -1,4 +1,3 @@
-# ── Stage: base ────────────────────────────────────────────────────────────────
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -13,20 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install dependencies ───────────────────────────────────────────────────────
-# COPY requirements first — so code changes don't invalidate this layer
-COPY requirements.txt .
+# Path is relative to repo root — works when Dockerfile is at repo root
+COPY backend/requirements.txt ./requirements.txt
 
-# torch CPU-only (~700MB vs ~2.5GB GPU version)
 RUN pip install --no-cache-dir torch==2.2.2 \
     --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip install --no-cache-dir -r requirements.txt
-
-# ── Pre-download models ────────────────────────────────────────────────────────
-# Baked into image so container starts in seconds with no runtime downloads.
-# Using lighter reranker (90MB) instead of bge-reranker-base (278MB)
-# to stay within Railway free tier 512MB RAM limit.
 
 RUN python -c "\
 from sentence_transformers import SentenceTransformer; \
@@ -40,9 +32,8 @@ print('Downloading reranker model...'); \
 CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
 print('Reranker model cached.')"
 
-# ── Copy application code ──────────────────────────────────────────────────────
-# Last layer — code changes only rebuild from here, not pip or model layers
-COPY . .
+# Copy entire backend folder as app code
+COPY backend/ .
 
 EXPOSE 8000
 
