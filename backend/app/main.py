@@ -16,27 +16,25 @@ async def lifespan(app: FastAPI):
     # ── STARTUP ──────────────────────────────────────
     logger.info("TesseractRAG starting...")
 
-    # Load embedding model into memory NOW — blocks until ready
+    # Load embedding model — needed for every request
     logger.info("Loading embedding model...")
     get_embedding_model()
     logger.info("Embedding model ready ✓")
 
-    # Load reranker model into memory NOW
-    logger.info("Loading reranker model...")
-    get_reranker()
-    logger.info("Reranker model ready ✓")
+    # Skip reranker preload — load lazily on first request
+    # to stay within Railway free tier 512MB RAM limit
+    logger.info("Reranker will load on first request (memory optimization)")
 
-    # Reload persisted sessions from disk
+    # Reload persisted sessions
     logger.info("Loading persisted sessions...")
     manager = get_session_manager()
     logger.info(f"Sessions loaded: {len(manager._sessions)} ✓")
 
-    logger.info("TesseractRAG ready — all models loaded")
+    logger.info("TesseractRAG ready")
     yield
 
     # ── SHUTDOWN ─────────────────────────────────────
     logger.info("TesseractRAG shutting down...")
-
 app = FastAPI(
   lifespan = lifespan,
 	title="TesseractRAG",
@@ -73,19 +71,16 @@ app.include_router(
 )
 
 
-@app.get("/health",tags=["Health"])
+@app.get("/health", tags=["Health"])
 async def health():
     try:
         embedder_ready = get_embedding_model() is not None
-        reranker_ready = get_reranker() is not None
     except Exception:
         embedder_ready = False
-        reranker_ready = False
 
-    all_ready = embedder_ready and reranker_ready
     return {
-        "status": "healthy" if all_ready else "loading",
-        "models_ready": all_ready,
+        "status": "healthy" if embedder_ready else "loading",
+        "models_ready": embedder_ready,
         "embedder": embedder_ready,
-        "reranker": reranker_ready,
+        "reranker": "lazy_load",
     }
