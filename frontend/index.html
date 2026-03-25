@@ -533,6 +533,12 @@ body::after {
   .welcome-step { width: 200px; }
   .sources-header { font-size: 8px; }
 }
+
+/* Close button row — only shown on mobile/tablet */
+.sidebar-close-row { display: none; padding: 10px 16px 0; }
+.btn-sidebar-close { background: transparent; border: 1px solid var(--border); border-radius: var(--rs); color: var(--gray-300); font-family: var(--font-m); font-size: 11px; padding: 6px 12px; cursor: pointer; width: 100%; text-align: left; transition: all 0.15s; }
+.btn-sidebar-close:hover { color: var(--white); border-color: var(--gray-500); }
+@media (max-width: 900px) { .sidebar-close-row { display: block; } }
 </style>
 </head>
 <body>
@@ -587,6 +593,9 @@ body::after {
 
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
+    <div class="sidebar-close-row" id="sidebar-close-row">
+      <button class="btn-sidebar-close" onclick="closeSidebar()">✕ Close</button>
+    </div>
     <div class="sidebar-top">
       <button class="btn-new" onclick="toggleNewForm()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
