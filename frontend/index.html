@@ -912,7 +912,7 @@ function setStatus(s) {
 async function init() {
   await checkHealth();
   await loadSessions();
-  setInterval(checkHealth, 30000);
+  setInterval(checkHealth, 10_800_000); // 6h 
 }
 
 /* ═══════════════════════════════════════════════════
