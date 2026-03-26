@@ -31,6 +31,9 @@ import faiss
 from typing import Optional, Any
 from datetime import datetime, timezone
 from uuid import uuid4
+import hashlib
+import numpy as np
+
 
 from fastapi import HTTPException
 
@@ -458,7 +461,49 @@ class SessionManager:
         self._save_metadata(session)
         logger.info(f"Message saved | session={session_id[:8]}... | role={role}")
 
-    # ── Ingestion pipeline ─────────────────────────────────────────────────────
+    def delete_document(self, session: SessionState, filename: str, owner_id: str) -> int:
+        """
+        Remove all chunks belonging to filename, rebuild FAISS + BM25,
+        and persist updated state to R2.
+        """
+        self._assert_owner(session, owner_id)
+
+        # 1. Filter chunks
+        original_count = len(session.chunks)
+        session.chunks = [c for c in session.chunks if c["document_name"] != filename]
+        removed_count = original_count - len(session.chunks)
+
+        if removed_count == 0:
+            return 0
+
+        # 2. Update document_names
+        session.document_names = [n for n in session.document_names if n != filename]
+
+        # 3. Persist updated chunks to R2
+        self._r2.put_json(session.r2_chunks_key, session.chunks)
+
+        # 4. Rebuild + persist FAISS (using your existing _save_faiss_index)
+        if session.chunks:
+            vectors = np.array(
+                [c["embedding"] for c in session.chunks], dtype=np.float32
+            )
+            session.faiss_index = FAISSIndexer(_config().DIM_FAISS)
+            session.faiss_index.index.add(vectors)
+            self._save_faiss_index(session)   # ← your existing method
+        else:
+            session.faiss_index = None
+
+        # 5. Rebuild BM25 in memory (never persisted — same as startup path)
+        if session.chunks:
+            session.bm25_retriever = BM25Retriever()
+            session.bm25_retriever.build(session.chunks)
+        else:
+            session.bm25_retriever = None
+
+        # 6. Persist updated metadata (uses your existing _save_metadata)
+        self._save_metadata(session)          # ← your existing method
+
+        return removed_count
 
     def ingest_document(
         self,
@@ -511,14 +556,20 @@ class SessionManager:
         # 3. Embed
         vectors = Embedder().embed_chunks(chunks=chunks)
 
+        # ── ADD THIS ──────────────────────────────────────────────────────────
+        # Store each vector inside its chunk dict so chunks.json is self-contained.
+        # This makes FAISS rebuild on delete instant (no re-embedding needed).
+        for i, chunk in enumerate(chunks):
+            chunk["embedding"] = vectors[i].tolist()   # float32 → JSON-serializable list
+        # ─────────────────────────────────────────────────────────────────────
+
         # 4. Add to FAISS (create index on first document)
         if session.faiss_index is None:
             session.faiss_index = FAISSIndexer(vectors.shape[1])
         session.faiss_index.add(vectors)
 
-        # 5. Extend chunk list
+        # 5. Extend chunk list  ← now chunks carry their embeddings
         session.chunks.extend(chunks)
-
         # 6. Rebuild BM25 over all chunks
         session.bm25_retriever = BM25Retriever()
         session.bm25_retriever.build(session.chunks)

@@ -86,3 +86,24 @@ async def list_documents(
         }
         for name in session.document_names
     ]
+@router.delete("/{session_id}/documents/{filename}")
+async def delete_document(
+    session_id: str,
+    filename: str,
+    sm: SessionManager = Depends(get_session_manager),
+    owner_id: str = Depends(get_owner_id)
+):
+    session = sm.get_session(session_id, owner_id=owner_id)
+
+    removed = sm.delete_document(session, filename, owner_id)
+
+    if removed == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document '{filename}' not found in session"
+        )
+
+    return {
+        "message": f"'{filename}' deleted",
+        "chunks_removed": removed
+    }

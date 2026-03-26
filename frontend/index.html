@@ -420,6 +420,17 @@ body::after {
 .chunk-bar { height: 3px; background: var(--navy-700); border-radius: 2px; overflow: hidden; margin-top: 5px; width: 100px; }
 .chunk-bar-fill { height: 100%; background: linear-gradient(90deg,var(--blue-500),var(--cyan-400)); border-radius: 2px; }
 .docs-empty { text-align: center; color: var(--gray-500); font-size: 12px; padding: 20px 0; }
+.doc-item { position: relative; }
+.btn-doc-del {
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  width: 26px; height: 26px; border: none;
+  background: rgba(239,68,68,0.1); border-radius: 5px;
+  color: var(--danger); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; flex-shrink: 0;
+}
+.doc-item:hover .btn-doc-del { opacity: 1; }
+.btn-doc-del:hover { background: rgba(239,68,68,0.28); }
 
 /* ═══════════════════════════════════════════════════
    TOAST
@@ -761,7 +772,7 @@ body::after {
 <!-- Delete Modal -->
 <div class="modal-overlay" id="delete-modal">
   <div class="modal">
-    <h3>Delete Session</h3>
+    <h3 id="delete-modal-title">Delete Session</h3>
     <p id="delete-modal-text"></p>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
@@ -877,6 +888,7 @@ const api = {
   deleteSession:  (id)         => apiCall('DELETE', `/api/v1/sessions/${id}`),
   listDocuments:  (id)         => apiCall('GET',    `/api/v1/sessions/${id}/documents`),
   uploadDocument: (id, fd)     => apiCall('POST',   `/api/v1/sessions/${id}/documents`, fd, true),
+  deleteDocument: (sid, fname) => apiCall('DELETE', `/api/v1/sessions/${sid}/documents/${encodeURIComponent(fname)}`),
   chat:           (id, q, s)   => apiCall('POST',   `/api/v1/sessions/${id}/chat`, { question: q, strategy: s, show_context: true }),
 };
 
@@ -1066,9 +1078,18 @@ function updateSessionHeader() {
 ════════════════════════════════════════════════════ */
 function openDeleteModal(id, name) {
   state.pendingDelete = id;
+  document.getElementById('delete-modal-title').textContent = 'Delete Session';
   document.getElementById('delete-modal-text').textContent =
     `Are you sure you want to delete "${name}"? All documents and conversation history will be permanently removed.`;
   document.getElementById('confirm-delete-btn').onclick = confirmDelete;
+  document.getElementById('delete-modal').classList.add('open');
+}
+function openDocDeleteModal(sessionId, filename) {
+  state.pendingDelete = { sessionId, filename };
+  document.getElementById('delete-modal-title').textContent = 'Remove Document';
+  document.getElementById('delete-modal-text').textContent =
+    `Remove "${filename}" from this session? Its chunks will be deleted from the index and the FAISS index will be rebuilt.`;
+  document.getElementById('confirm-delete-btn').onclick = confirmDocDelete;
   document.getElementById('delete-modal').classList.add('open');
 }
 function closeDeleteModal() {
@@ -1093,6 +1114,29 @@ async function confirmDelete() {
     renderSessionList();
     updateTopbarStats();
     toast('Session deleted', 'info');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function confirmDocDelete() {
+  const pending = state.pendingDelete;
+  if (!pending || typeof pending !== 'object') return;
+  const { sessionId, filename } = pending;
+  closeDeleteModal();
+  try {
+    const result = await api.deleteDocument(sessionId, filename);
+    // Remove from local state
+    state.documents[sessionId] = (state.documents[sessionId] || [])
+      .filter(d => d.filename !== filename);
+    saveDocs(sessionId);
+    // Update session doc count
+    const s = state.sessions.find(x => x.id === sessionId);
+    if (s) s.document_count = state.documents[sessionId].length;
+    renderSessionList();
+    renderDocs();
+    updateSessionHeader();
+    updateTopbarStats();
+    const removed = result?.chunks_removed ?? '?';
+    toast(`"${filename}" removed · ${removed} chunks deleted · index rebuilt`, 'info');
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -1376,7 +1420,9 @@ function renderDocs() {
           <span>🕐 ${uploaded}</span>
         </div>
         <div class="chunk-bar"><div class="chunk-bar-fill" style="width:${barPct}%"></div></div>
-      </div>`;
+      </div>
+      <button class="btn-doc-del" title="Remove document"
+        onclick="event.stopPropagation(); openDocDeleteModal('${esc(id)}', '${esc(doc.filename)}')">✕</button>`;
     list.appendChild(el);
   });
   updateSessionHeader();
