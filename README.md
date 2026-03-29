@@ -65,12 +65,7 @@ Most RAG demos are single-session toys: upload one document, ask one question, l
 
 ---
 
-## Live Demo
-
-| Service | URL |
-|---|---|
-| **Frontend** | [`https://tesseractrag.ziayd-usf.workers.dev`](https://tesseractrag.ziayd-usf.workers.dev) |
-| **Backend API Docs** | `https://<your-railway-url>.railway.app/docs` |
+## [`Live Demo`](https://tesseractrag.ziayd-usf.workers.dev)
 
 > ⚠️ **Cold Start Notice:** The Railway backend may take 30–60 seconds to wake on first request. The frontend retries automatically — this is a free-tier constraint. Subsequent requests within the same session are fast.
 
