@@ -10,10 +10,15 @@
 > ***lexical**, **semantic**, **contextual**, and **temporal** dimensions intersecting to produce accurate, grounded answers.*
 
 ---
-
-**imagesss**
-**imagesss**
-**imagesss**
+![landing](assets/LANDING.png)
+![create_session](assets/create_session.png)
+![docs](assets/docs.png)
+![res1](assets/res1_chat.png)
+![res2](assets/res2_chat.png)
+![del1](assets/del1.png)
+![del2](assets/del2.png)
+![del3](assets/del3.png)
+![about](assets/about.png)
 
 <br/>
 
