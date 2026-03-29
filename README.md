@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="2500" height="500" alt="Gemini_Generated_Image_jbdjirjbdjirjbd444444444j" src="https://github.com/user-attachments/assets/c801f73b-4230-494e-8ded-361a69527095" />
+![alt text](assets/banar.PNG)
 
 **Advanced (Modular) ـــــ Adaptive Multi-Session Retrieval-Augmented Generation System**<br>
 *Production-grade · Hybrid Retrieval · Anonymous Identity · Cloud-Native*<br>
