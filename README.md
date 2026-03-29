@@ -541,23 +541,18 @@ The engineering concepts this project forced me to understand — not just use:
 
 ---
 
-## Author
-
-<div align="center">
-
-**Zeyad Yousif** — AI Engineer (Learning in Public)
-
-[![GitHub](https://img.shields.io/badge/GitHub-zeyadusf-181717?style=flat-square&logo=github)](https://github.com/zeyadusf)
-
-*TesseractRAG is a learning project built under senior engineering mentorship.*
-*Every component was designed to be understood, not just to work.*
-
-</div>
-
----
-
 <div align="center">
 
 *TesseractRAG — Because understanding how something works is more valuable than having it work.*
 
 </div>
+
+## Related Repositories
+
+<div align="center">
+
+**[`Semantic Search and RAG`](https://github.com/zeyadusf/Semantic_Search_and_RAG)**
+**[`LLMs from Scratch`](https://github.com/zeyadusf/LLMs-from-Scratch)**
+
+</div>
+
