@@ -240,6 +240,9 @@ The identity is stable across page refreshes and backend restarts without requir
 | **Backend Hosting** | Railway | Docker deploy · auto-deploys from `main` on push |
 | **Frontend Hosting** | Cloudflare Workers | Global edge · free tier · instant deploys |
 
+🤖 Evaluation Approach `v1.2.0`
+  - Instead of using RAGAS, the evaluation system was implemented using Cohere’s chat API as an LLM-as-a-judge.
+  - This decision was made because RAGAS requires an OpenAI API key, which was not available in this environment.
 ---
 
 ## Project Structure
@@ -256,6 +259,7 @@ tesseractrag/
 │   │   ├── api/v1/
 │   │   │   ├── sessions.py          # POST / GET / DELETE sessions
 │   │   │   ├── documents.py         # POST / GET / DELETE documents
+│   │   │   ├── evaluation.py        # GET evalution <v1.2>
 │   │   │   └── chat.py              # POST chat — full RAG pipeline
 │   │   │
 │   │   ├── core/
@@ -280,7 +284,13 @@ tesseractrag/
 │   │   │   └── generation/
 │   │   │       ├── context_builder.py   # MD5 dedup · source attribution · budget
 │   │   │       ├── prompt_builder.py    # Multi-turn prompt · history management
-│   │   │       └── llm_client.py        # HF Inference Router async client
+│   │   │       └── llm_client.py        # HF Inference Router async 
+│   │   │   │
+│   │   │   ├── evaluation/
+│   │   │       └── ragas_evaluator.py   # LLM as judge <v1.2>
+│   │   │
+│   │   ├── services/
+│   │   │   ├── ragas_service.py         # <v1.2>
 │   │   │
 │   │   ├── models/
 │   │   │   ├── session.py           # SessionCreate · SessionResponse
@@ -398,6 +408,15 @@ All endpoints are under `/api/v1/`. Every request must include `X-Owner-ID: <uui
 |---|---|---|---|
 | `POST` | `/api/v1/sessions/{id}/chat` | Ask a question, receive a grounded answer with sources | 200 |
 
+### Evaluation
+> How Evaluation Works: 
+> * Triggered automatically inside the /chat endpoint
+> * Runs asynchronously using BackgroundTasks
+
+| Method | Endpoint | Description | Status Code |
+|---|---|---|---|
+| `POST` | `/api/v1/sessions/{id}/evaluate` | Retrieves stored evaluation results for a specific session (asynchronous evaluation is executed during chat). | 200 |
+
 **Example request:**
 ```json
 {
@@ -432,6 +451,7 @@ All endpoints are under `/api/v1/`. Every request must include `X-Owner-ID: <uui
 | Variable | Default | Description |
 |---|---|---|
 | `HF_API_TOKEN` | *(required)* | HuggingFace API token — `hf.co/settings/tokens` |
+|`COHERE_API_KEY` | *(required)* | Cohere API token |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Sentence embedding model |
 | `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranker |
 | `LLM_MODEL` | `meta-llama/Llama-3.1-8B-Instruct` | LLM for answer generation |
@@ -506,7 +526,7 @@ Each phase was approached as a deliberate learning milestone — system design f
 ## Future Roadmap
 
 ### v1.x — Evaluation & Hardening
-- [ ] RAGAS evaluation suite — faithfulness, context precision, answer relevancy
+- ✔ RAGAS evaluation suite — faithfulness, context precision, answer relevancy
 - [ ] Query rewriting with FLAN-T5 before retrieval
 - [ ] Token-based JWT authentication
 - [ ] SSE streaming LLM responses — token-by-token output
