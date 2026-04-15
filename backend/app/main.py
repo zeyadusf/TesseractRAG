@@ -11,7 +11,7 @@ it in allow_headers, the browser will block the preflight OPTIONS request.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.api.v1 import sessions, documents, chat
+from app.api.v1 import sessions, documents, chat, evaluation
 from app.utils.logger import get_logger
 
 from app.core.ingestion.embedder import get_embedding_model
@@ -63,7 +63,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5500",
         "http://127.0.0.1:5500",
-        "https://tesseractrag.ziayd-usf.workers.dev",
+        "https://tesseractrag.ziayd-usf.workers.dev","*"
     ],
     allow_methods=["*"],
     allow_headers=[
@@ -85,6 +85,10 @@ app.include_router(
     prefix="/api/v1/sessions",
     tags=["Chat"],
 )
+
+app.include_router(evaluation.router,
+        prefix="/api/v1/sessions",
+        tags=["Evaluation"],)
 
 app.include_router(
     documents.router,
@@ -108,7 +112,7 @@ async def health():
 
     return {
         "status":       "healthy" if embedder_ready else "loading",
-        "version":      "1.1.0",
+        "version":      "1.2.0",
         "models_ready": embedder_ready,
         "embedder":     embedder_ready,
         "reranker":     "lazy_load",
