@@ -526,7 +526,7 @@ Each phase was approached as a deliberate learning milestone — system design f
 ## Future Roadmap
 
 ### v1.x — Evaluation & Hardening
-- ✔ RAGAS evaluation suite — faithfulness, context precision, answer relevancy
+ ✔ RAGAS evaluation suite — faithfulness, context precision, answer relevancy `1.2.0`
 - [ ] Query rewriting with FLAN-T5 before retrieval
 - [ ] Token-based JWT authentication
 - [ ] SSE streaming LLM responses — token-by-token output
