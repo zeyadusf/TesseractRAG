@@ -240,7 +240,7 @@ The identity is stable across page refreshes and backend restarts without requir
 | **Backend Hosting** | Railway | Docker deploy · auto-deploys from `main` on push |
 | **Frontend Hosting** | Cloudflare Workers | Global edge · free tier · instant deploys |
 
-🤖 Evaluation Approach `v1.2.0`
+**🤖 Evaluation Approach `v1.2.0`**
   - Instead of using RAGAS, the evaluation system was implemented using Cohere’s chat API as an LLM-as-a-judge.
   - This decision was made because RAGAS requires an OpenAI API key, which was not available in this environment.
 ---
@@ -415,7 +415,7 @@ All endpoints are under `/api/v1/`. Every request must include `X-Owner-ID: <uui
 
 | Method | Endpoint | Description | Status Code |
 |---|---|---|---|
-| `POST` | `/api/v1/sessions/{id}/evaluate` | Retrieves stored evaluation results for a specific session (asynchronous evaluation is executed during chat). | 200 |
+| `GET` | `/api/v1/sessions/{id}/evaluate` | Retrieves stored evaluation results for a specific session (asynchronous evaluation is executed during chat). | 200 |
 
 **Example request:**
 ```json
