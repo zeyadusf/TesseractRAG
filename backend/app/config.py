@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # ── HuggingFace ────────────────────────────────────────────────
     HF_API_TOKEN: Optional[str] = None
+    COHERE_API_KEY : Optional[str] = None
 
     # ── Models ─────────────────────────────────────────────────────
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"

@@ -96,6 +96,7 @@ class SessionState:
 
         # Conversation history
         self.messages: list[dict] = []
+        self.ragas_evaluation :list[dict] = []
 
     # ── R2 key properties ──────────────────────────────────────────────────────
 
@@ -178,6 +179,7 @@ class SessionManager:
             "owner_id":       session.owner_id,       # ← NEW: persisted to R2
             "document_names": session.document_names,
             "messages":       session.messages,
+            "ragas_evaluation" : session.ragas_evaluation
         }
         self._r2.put_json(session.r2_metadata_key, data_dict)
 
@@ -267,6 +269,7 @@ class SessionManager:
                 )
                 session.document_names = meta.get("document_names", [])
                 session.messages = meta.get("messages", [])
+                session.ragas_evaluation = meta.get("ragas_evaluation", [])
 
                 # 2. Load chunks
                 chunks = self._r2.get_json(session.r2_chunks_key)
