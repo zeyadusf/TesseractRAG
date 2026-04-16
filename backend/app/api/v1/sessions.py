@@ -9,7 +9,7 @@ the requesting owner — cross-owner access is rejected at the manager level.
 """
 
 from fastapi import APIRouter, Depends
-from app.models.session import SessionCreate, SessionResponse
+from backend.app.schemas.api.session import SessionCreate, SessionResponse
 from app.dependencies import get_session_manager, get_owner_id
 from app.core.session_manager import SessionManager
 

@@ -37,7 +37,7 @@ import numpy as np
 
 from fastapi import HTTPException
 
-from app.models.session import SessionResponse
+from backend.app.schemas.api.session import SessionResponse
 from app.config import get_settings as _config
 from app.utils.logger import get_logger
 from app.core.storage.r2_storage import R2Storage

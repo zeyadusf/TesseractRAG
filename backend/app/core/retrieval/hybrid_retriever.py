@@ -37,7 +37,7 @@ class HybridRetriever:
         
         bm25_res = self.bm25_retriever.retrieve(query,top_k)
         query_vec = self.embedder.embed_query(query)
-        scores, indices = self.faiss_indexer.search(query_vec, 5)
+        _, indices = self.faiss_indexer.search(query_vec, 5) 
         faiss_res = [self.chunks[i] for i in indices[0]]
         if strategy == 'hybrid' :
             return reciprocal_rank_fusion(bm25_res,faiss_res)

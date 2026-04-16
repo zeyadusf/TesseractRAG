@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from pathlib import Path
 from app.dependencies import get_session_manager, get_owner_id
 from app.core.session_manager import SessionManager
-from app.models.document import DocumentInfo
+from backend.app.schemas.api.document import DocumentInfo
 
 router = APIRouter()
 

@@ -5,7 +5,7 @@ Chat endpoint with async RAG evaluation (RAGAS).
 """
 
 from fastapi import APIRouter, Depends, BackgroundTasks
-from app.models.chat import ChatRequest, ChatResponse
+from schemas.api.chat import ChatRequest, ChatResponse
 from app.core.session_manager import SessionManager
 from app.core.retrieval.router import RetrievalRouter
 from app.core.retrieval.hybrid_retriever import HybridRetriever
