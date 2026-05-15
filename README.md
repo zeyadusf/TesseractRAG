@@ -2,7 +2,7 @@
 
 ![alt text](assets/banar.PNG)
 
-**Advanced (Modular) ـــــ Adaptive Multi-Session Retrieval-Augmented Generation System**<br>
+**Advanced (Modular) ـــــ Adaptive Multi-Session Retrieval-Augmented Generation System** <br>
 *Production-grade · Hybrid Retrieval · Anonymous Identity · Cloud-Native*<br>
 
 > *Built as a deliberate learning project — every component designed, debugged, and understood from first principles.*
@@ -43,7 +43,7 @@
 
 ---
 
-## Why TesseractRAG?
+## Why TesseractRAG V1.2.0?
 
 TesseractRAG started as a question: *what does it actually take to build a production-grade RAG system from scratch?*
 
