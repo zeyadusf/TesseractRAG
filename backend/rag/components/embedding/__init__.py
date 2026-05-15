@@ -1,0 +1,1 @@
+from backend.rag.components.embedding.providers.jina_embedder import JinaProvider

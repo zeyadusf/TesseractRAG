@@ -1,0 +1,4 @@
+from backend.rag.components.parsing.parse_dispatcher import ParserDispatcher
+from backend.rag.components.lang_detector import detect_language,get_language_or_fallback,is_supported_language
+from backend.rag.components.cleaning.clean_dispatcher import CleanerDispatcher
+from backend.rag.components.chunking.chunk_dispatcher import ChunkerDispatcher
