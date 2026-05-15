@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/docker/Dockerfile
+    container_name: tesseractrag_v2
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    command: >
+      sh -c "
+      cd /app/backend/storage/db/postgres &&
+      alembic upgrade head &&
+      cd /app &&
+      uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    volumes:
+      # [PROD] delete
+      - .:/app
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # [PROD] change to always
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 180s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - backend_net
+
+  pgvector:
+    image: pgvector/pgvector:pg18-trixie
+    container_name: pgvector_tess
+    # [PROD] delete
+    ports:
+      - "5432:5432"
+    env_file:
+      - backend/docker/.env
+    volumes:
+      - pgvector_data:/var/lib/postgresql
+      - ./backend/docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_tess
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "6379:6379"    # [PROD] delete
+    networks:
+      - backend_net
+
+  redisinsight:
+      image: redis/redisinsight:latest
+      container_name: redisinsight_tess
+      ports:
+        - "5540:5540"
+      networks:
+        - backend_net
+      restart: unless-stopped
+volumes:
+  pgvector_data:
+
+networks:
+  backend_net:
+    driver: bridge
