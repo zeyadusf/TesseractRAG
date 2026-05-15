@@ -1,0 +1,2 @@
+from .retrieval_strategy import RetrievalStrategy
+from .embedding_enum import JinaEmbedTasks
