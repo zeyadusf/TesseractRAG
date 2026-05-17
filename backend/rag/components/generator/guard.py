@@ -15,7 +15,7 @@ from .hf_generator import get_hf_generator
 
 logger = get_logger(__name__)
 
-REDIS_URL = "redis://redis_tess:6379"
+REDIS_URL = get_config().REDIS_URL
 REDIS_KEY = "groq:daily_request_count"
 REDIS_RESET_KEY = "groq:last_reset_date"
 
