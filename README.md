@@ -10,7 +10,7 @@
 > ***lexical**, **semantic**, **contextual**, and **temporal** dimensions intersecting to produce accurate, grounded answers.*
 
 ---
-
+<!--
 <details>
 <summary><strong>📸 Screenshots — click to expand</strong></summary>
 <br>
@@ -39,7 +39,7 @@
 </div>
 
 ---
-
+-->
 ## What is TesseractRAG?
 
 TesseractRAG started as a question: *what does it actually take to build a production-grade RAG system from scratch?*
