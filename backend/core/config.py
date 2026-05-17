@@ -123,6 +123,7 @@ class Config(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS:int
 
     # ــــــــــــــ 
+    REDIS_URL:str
 # =====================================
     model_config = SettingsConfigDict(
         env_file = ".env",
