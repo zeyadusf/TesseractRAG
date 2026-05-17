@@ -41,6 +41,7 @@
 ---
 -->
 </div>
+
 ## What is TesseractRAG?
 
 TesseractRAG started as a question: *what does it actually take to build a production-grade RAG system from scratch?*
@@ -81,7 +82,8 @@ Not a tutorial. Not a framework wrapper. A real system — with a proper ingesti
 
 ---
 
-## What's New in v2.0
+
+##  What's New in v2.0
 
 v2.0 is not an incremental update — it's a full architectural redesign built on lessons learned from v1.
 
