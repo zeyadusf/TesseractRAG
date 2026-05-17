@@ -36,10 +36,11 @@
 [![License](https://img.shields.io/badge/License-MIT-22D3EE?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-10B981?style=flat-square)]()
 
-</div>
+
 
 ---
 -->
+</div>
 ## What is TesseractRAG?
 
 TesseractRAG started as a question: *what does it actually take to build a production-grade RAG system from scratch?*
