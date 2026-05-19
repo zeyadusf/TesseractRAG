@@ -1171,842 +1171,1306 @@
   <div id="toast-container"></div>
 
   <script>
-  const API_BASE = 'https://tesseractrag-production.up.railway.app/';
-  // const API_BASE = 'http://localhost:8000/';
+  // ═══════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════
+const API_BASE = 'https://tesseractrag-production.up.railway.app/';
+// const API_BASE = 'http://localhost:8000/';
 
-  const State = {
-    token: localStorage.getItem('tesseract_token'),
-    refreshToken: localStorage.getItem('tesseract_refresh'),
-    user: null, isAdmin: false, sessions: [],
-    activeSession: null, activePanel: null, streaming: false,
-    _adminCurrentUserId: null, _adminCurrentUser: null,
-    theme: localStorage.getItem('tesseract_theme') || 'dark',
-    isOnline: navigator.onLine,
-    _pendingConfirmAction: null,
-    _moreMenuOpen: false,
-  };
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+const State = {
+  token: localStorage.getItem('tesseract_token'),
+  refreshToken: localStorage.getItem('tesseract_refresh'),
+  user: null, isAdmin: false, sessions: [],
+  activeSession: null, activePanel: null, streaming: false,
+  _adminCurrentUserId: null, _adminCurrentUser: null,
+  theme: localStorage.getItem('tesseract_theme') || 'dark',
+  isOnline: navigator.onLine,
+  _pendingConfirmAction: null,
+  _moreMenuOpen: false,
+};
 
-  async function apiFetch(path, opts = {}, retries = 3) {
-    const url = API_BASE + path;
-    const headers = {};
-    if (State.token) headers['Authorization'] = `Bearer ${State.token}`;
-    if (!opts.formData) headers['Content-Type'] = 'application/json';
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const res = await fetch(url, { method: opts.method || 'GET', headers, body: opts.formData ? opts.formData : opts.body ? JSON.stringify(opts.body) : undefined });
-        if (res.status === 204) return null;
-        if (res.status === 401) { 
-          const data = await res.json().catch(() => ({}));
-          if (data.detail && data.detail.includes('expired')) {
-            App.logout(); 
-          }
-          throw new Error('Session expired'); 
+// ═══════════════════════════════════════════════════════
+// CACHE LAYER
+// in-memory cache with TTL — no Redis needed on frontend
+// ═══════════════════════════════════════════════════════
+const Cache = {
+  _store: {},
+
+  set(key, value, ttlMs = 60_000) {
+    this._store[key] = { value, expiresAt: Date.now() + ttlMs };
+  },
+
+  get(key) {
+    const entry = this._store[key];
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      delete this._store[key];
+      return null;
+    }
+    return entry.value;
+  },
+
+  invalidate(key) {
+    delete this._store[key];
+  },
+
+  invalidatePrefix(prefix) {
+    Object.keys(this._store)
+      .filter(k => k.startsWith(prefix))
+      .forEach(k => delete this._store[k]);
+  },
+
+  clear() {
+    this._store = {};
+  }
+};
+
+// ═══════════════════════════════════════════════════════
+// TOKEN REFRESH
+// ═══════════════════════════════════════════════════════
+let _isRefreshing = false;
+
+async function _tryRefreshToken() {
+  if (!State.refreshToken) return false;
+  _isRefreshing = true;
+  try {
+    const res = await fetch(API_BASE + 'api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: State.refreshToken })
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    State.token = data.access_token;
+    State.refreshToken = data.refresh_token;
+    localStorage.setItem('tesseract_token', data.access_token);
+    localStorage.setItem('tesseract_refresh', data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    _isRefreshing = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// API FETCH — with auto refresh on 401
+// ═══════════════════════════════════════════════════════
+async function apiFetch(path, opts = {}, retries = 3) {
+  const url = API_BASE + path;
+  const headers = {};
+  if (State.token) headers['Authorization'] = `Bearer ${State.token}`;
+  if (!opts.formData) headers['Content-Type'] = 'application/json';
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: opts.method || 'GET',
+        headers,
+        body: opts.formData
+          ? opts.formData
+          : opts.body
+            ? JSON.stringify(opts.body)
+            : undefined
+      });
+
+      if (res.status === 204) return null;
+
+      // ── 401: جرب refresh الأول قبل ما تعمل logout ──
+      if (res.status === 401 && !_isRefreshing) {
+        const refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          // عدّل الـ header وعيد الـ request
+          headers['Authorization'] = `Bearer ${State.token}`;
+          const retry = await fetch(url, {
+            method: opts.method || 'GET',
+            headers,
+            body: opts.formData
+              ? opts.formData
+              : opts.body
+                ? JSON.stringify(opts.body)
+                : undefined
+          });
+          if (retry.status === 204) return null;
+          const retryData = await retry.json().catch(() => ({}));
+          if (!retry.ok) throw new Error(retryData.detail || `Error ${retry.status}`);
+          return retryData;
+        } else {
+          // الـ refresh فشل — logout
+          App.logout();
+          throw new Error('Session expired');
         }
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
-        return data;
-      } catch (e) { 
-        if (attempt === retries) {
-          if (e.message.includes('expired') || e.message.includes('Session expired')) {
-            throw e;
-          }
-          console.warn('API retry failed:', e.message);
-          throw e;
-        }
-        await new Promise(r => setTimeout(r, 500 * attempt)); 
       }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+      return data;
+
+    } catch (e) {
+      if (attempt === retries) throw e;
+      if (e.message.includes('expired') || e.message.includes('Session expired')) throw e;
+      await new Promise(r => setTimeout(r, 500 * attempt));
     }
   }
+}
 
-  function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// ═══════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
-  function fmtMd(text) {
-    return String(text || '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre style="background:rgba(0,0,0,0.3);padding:12px;border-radius:8px;margin:10px 0;font-family:var(--font-mono);font-size:0.88rem;overflow-x:auto;">$1</pre>')
-      .replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.2);padding:2px 5px;border-radius:4px;font-family:var(--font-mono);">$1</code>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/\n/g, '<br>');
-  }
+function fmtMd(text) {
+  return String(text || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre style="background:rgba(0,0,0,0.3);padding:12px;border-radius:8px;margin:10px 0;font-family:var(--font-mono);font-size:0.88rem;overflow-x:auto;">$1</pre>')
+    .replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.2);padding:2px 5px;border-radius:4px;font-family:var(--font-mono);">$1</code>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
 
-  function fmtBytes(b) { if (!b) return '0 B'; const u = ['B','KB','MB','GB'], i = Math.floor(Math.log(b) / Math.log(1024)); return (b / Math.pow(1024, i)).toFixed(1) + ' ' + u[i]; }
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  const u = ['B','KB','MB','GB'];
+  const i = Math.floor(Math.log(b) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(1) + ' ' + u[i];
+}
 
-  function toast(msg, type = 'info') {
-    const c = document.getElementById('toast-container');
-    const el = document.createElement('div');
-    const icons = { suc: '✅', err: '❌', warn: '⚠️', info: 'ℹ️' };
-    el.className = `toast ${type}`;
-    el.innerHTML = `<span style="font-size:1rem">${icons[type]||'ℹ️'}</span><span>${esc(msg)}</span>`;
-    c.appendChild(el);
-    setTimeout(() => el.remove(), 4000);
-  }
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  const icons = { suc: '✅', err: '❌', warn: '⚠️', info: 'ℹ️' };
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span style="font-size:1rem">${icons[type]||'ℹ️'}</span><span>${esc(msg)}</span>`;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
 
-  const AI_AVATAR_SVG = `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <polygon points="4,8 14,3 24,8 24,20 14,25 4,20" fill="none" stroke="#3B82F6" stroke-width="1.2" stroke-linejoin="round"/>
-    <polygon points="9,11 14,8 19,11 19,17 14,20 9,17" fill="none" stroke="#22D3EE" stroke-width="1" stroke-linejoin="round"/>
-    <line x1="4" y1="8"  x2="9"  y2="11" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
-    <line x1="24" y1="8"  x2="19" y2="11" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
-    <line x1="24" y1="20" x2="19" y2="17" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
-    <line x1="4"  y1="20" x2="9"  y2="17" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
-    <line x1="14" y1="3"  x2="14" y2="8"  stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
-    <line x1="14" y1="25" x2="14" y2="20" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
-    <circle cx="14" cy="14" r="1.5" fill="#22D3EE" opacity="0.9"/>
-  </svg>`;
+const AI_AVATAR_SVG = `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <polygon points="4,8 14,3 24,8 24,20 14,25 4,20" fill="none" stroke="#3B82F6" stroke-width="1.2" stroke-linejoin="round"/>
+  <polygon points="9,11 14,8 19,11 19,17 14,20 9,17" fill="none" stroke="#22D3EE" stroke-width="1" stroke-linejoin="round"/>
+  <line x1="4" y1="8"  x2="9"  y2="11" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
+  <line x1="24" y1="8"  x2="19" y2="11" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
+  <line x1="24" y1="20" x2="19" y2="17" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
+  <line x1="4"  y1="20" x2="9"  y2="17" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
+  <line x1="14" y1="3"  x2="14" y2="8"  stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
+  <line x1="14" y1="25" x2="14" y2="20" stroke="#60A5FA" stroke-width="0.8" opacity="0.7"/>
+  <circle cx="14" cy="14" r="1.5" fill="#22D3EE" opacity="0.9"/>
+</svg>`;
 
-  const App = {
-    showConfirmModal({ title = 'Confirm Action', message = 'Are you sure?', type = 'warning', action = null }) {
-      document.getElementById('confirm-icon').textContent = type === 'danger' ? '🗑️' : '⚠️';
-      document.getElementById('confirm-title').textContent = title;
-      document.getElementById('confirm-message').textContent = message;
-      const btn = document.getElementById('confirm-btn');
-      btn.className = `btn-confirm ${type === 'danger' ? 'danger' : 'warning'}`;
-      btn.textContent = type === 'danger' ? 'Delete' : 'Confirm';
-      State._pendingConfirmAction = action;
-      document.getElementById('confirm-modal-overlay').classList.add('open');
-    },
-    closeConfirmModal() { document.getElementById('confirm-modal-overlay').classList.remove('open'); State._pendingConfirmAction = null; },
-    executeConfirmAction() { if (typeof State._pendingConfirmAction === 'function') State._pendingConfirmAction(); this.closeConfirmModal(); },
+// ═══════════════════════════════════════════════════════
+// APP
+// ═══════════════════════════════════════════════════════
+const App = {
 
-    toggleMoreMenu() {
-      const dd = document.getElementById('nav-more-dropdown');
-      State._moreMenuOpen = !State._moreMenuOpen;
-      dd.classList.toggle('hidden', !State._moreMenuOpen);
-    },
-    closeMoreMenu() {
-      State._moreMenuOpen = false;
-      document.getElementById('nav-more-dropdown').classList.add('hidden');
-    },
+  // ── Confirm Modal ──────────────────────────────────
+  showConfirmModal({ title = 'Confirm Action', message = 'Are you sure?', type = 'warning', action = null }) {
+    document.getElementById('confirm-icon').textContent = type === 'danger' ? '🗑️' : '⚠️';
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    const btn = document.getElementById('confirm-btn');
+    btn.className = `btn-confirm ${type === 'danger' ? 'danger' : 'warning'}`;
+    btn.textContent = type === 'danger' ? 'Delete' : 'Confirm';
+    State._pendingConfirmAction = action;
+    document.getElementById('confirm-modal-overlay').classList.add('open');
+  },
+  closeConfirmModal() {
+    document.getElementById('confirm-modal-overlay').classList.remove('open');
+    State._pendingConfirmAction = null;
+  },
+  executeConfirmAction() {
+    if (typeof State._pendingConfirmAction === 'function') State._pendingConfirmAction();
+    this.closeConfirmModal();
+  },
 
-    toggleAuthMode(mode) {
-      document.getElementById('login-form').classList.toggle('hidden', mode === 'register');
-      document.getElementById('register-form').classList.toggle('hidden', mode === 'login');
-      ['auth-error','auth-success','reg-error','reg-success'].forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
-    },
+  // ── More Menu ──────────────────────────────────────
+  toggleMoreMenu() {
+    const dd = document.getElementById('nav-more-dropdown');
+    State._moreMenuOpen = !State._moreMenuOpen;
+    dd.classList.toggle('hidden', !State._moreMenuOpen);
+  },
+  closeMoreMenu() {
+    State._moreMenuOpen = false;
+    document.getElementById('nav-more-dropdown').classList.add('hidden');
+  },
 
-    async login() {
-      const email = document.getElementById('login-email').value.trim();
-      const pass = document.getElementById('login-pass').value;
-      const errEl = document.getElementById('auth-error');
-      const btn = document.getElementById('login-btn');
-      errEl.style.display = 'none';
-      if (!email || !pass) { errEl.textContent = 'Email and password are required'; errEl.style.display = 'block'; return; }
-      btn.innerHTML = '<span class="spinner"></span> Signing in…'; btn.disabled = true;
-      try {
-        const body = new URLSearchParams({ username: email, password: pass, grant_type: 'password' });
-        const res = await fetch(API_BASE + 'api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Login failed'); }
-        const data = await res.json();
-        State.token = data.access_token; State.refreshToken = data.refresh_token;
-        localStorage.setItem('tesseract_token', data.access_token);
-        localStorage.setItem('tesseract_refresh', data.refresh_token);
-        const me = await apiFetch('api/v1/auth/me');
-        State.user = me; State.isAdmin = me.is_superuser;
-        document.getElementById('auth-view').classList.add('hidden');
-        this._afterLogin();
-        toast('Welcome back, ' + (State.user?.username || 'User'), 'suc');
-      } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; toast('Login failed: ' + e.message, 'err'); }
-      finally { btn.innerHTML = 'Sign In'; btn.disabled = false; }
-    },
+  // ── Auth Mode ──────────────────────────────────────
+  toggleAuthMode(mode) {
+    document.getElementById('login-form').classList.toggle('hidden', mode === 'register');
+    document.getElementById('register-form').classList.toggle('hidden', mode === 'login');
+    ['auth-error','auth-success','reg-error','reg-success'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  },
 
-    async register() {
-      const username = document.getElementById('reg-username').value.trim();
-      const email = document.getElementById('reg-email').value.trim();
-      const pass = document.getElementById('reg-pass').value;
-      const confirm = document.getElementById('reg-pass-confirm').value;
-      const errEl = document.getElementById('reg-error');
-      const btn = document.getElementById('reg-btn');
-      errEl.style.display = 'none';
-      if (!username || !email || !pass || !confirm) { errEl.textContent = 'All fields are required'; errEl.style.display = 'block'; return; }
-      if (pass !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.style.display = 'block'; return; }
-      if (pass.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; errEl.style.display = 'block'; return; }
-      btn.innerHTML = '<span class="spinner"></span> Creating…'; btn.disabled = true;
-      try {
-        const res = await fetch(API_BASE + 'api/v1/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, email, password: pass }) });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Registration failed'); }
-        document.getElementById('reg-success').textContent = 'Account created! You can now sign in.';
-        document.getElementById('reg-success').style.display = 'block';
-        toast('Account created! 🎉', 'suc');
-        setTimeout(() => { App.toggleAuthMode('login'); document.getElementById('login-email').value = email; }, 2000);
-      } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; toast('Registration failed: ' + e.message, 'err'); }
-      finally { btn.innerHTML = 'Create Account'; btn.disabled = false; }
-    },
+  // ── Login ──────────────────────────────────────────
+  async login() {
+    const email = document.getElementById('login-email').value.trim();
+    const pass  = document.getElementById('login-pass').value;
+    const errEl = document.getElementById('auth-error');
+    const btn   = document.getElementById('login-btn');
+    errEl.style.display = 'none';
+    if (!email || !pass) { errEl.textContent = 'Email and password are required'; errEl.style.display = 'block'; return; }
+    btn.innerHTML = '<span class="spinner"></span> Signing in…'; btn.disabled = true;
+    try {
+      const body = new URLSearchParams({ username: email, password: pass, grant_type: 'password' });
+      const res  = await fetch(API_BASE + 'api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Login failed'); }
+      const data = await res.json();
+      this._saveAuthTokens(data);
+      const me = await apiFetch('api/v1/auth/me');
+      State.user    = me;
+      State.isAdmin = me.is_superuser;
+      document.getElementById('auth-view').classList.add('hidden');
+      this._afterLogin();
+      toast('Welcome back, ' + (State.user?.username || 'User'), 'suc');
+    } catch(e) {
+      errEl.textContent = e.message; errEl.style.display = 'block';
+      toast('Login failed: ' + e.message, 'err');
+    } finally {
+      btn.innerHTML = 'Sign In'; btn.disabled = false;
+    }
+  },
 
-    _afterLogin() {
-      this._updateUserUI();
-      if (State.isAdmin) {
-        document.getElementById('admin-toggle').classList.remove('hidden');
-        document.getElementById('admin-toggle-mob').classList.remove('hidden');
-      }
-      this.loadSessions();
-      this._updateServerStatus();
-      this._showWelcome();
-    },
+  // ── Register ───────────────────────────────────────
+  async register() {
+    const username = document.getElementById('reg-username').value.trim();
+    const email    = document.getElementById('reg-email').value.trim();
+    const pass     = document.getElementById('reg-pass').value;
+    const confirm  = document.getElementById('reg-pass-confirm').value;
+    const errEl    = document.getElementById('reg-error');
+    const btn      = document.getElementById('reg-btn');
+    errEl.style.display = 'none';
+    if (!username || !email || !pass || !confirm) { errEl.textContent = 'All fields are required'; errEl.style.display = 'block'; return; }
+    if (pass !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.style.display = 'block'; return; }
+    if (pass.length < 8)  { errEl.textContent = 'Password must be at least 8 characters'; errEl.style.display = 'block'; return; }
+    btn.innerHTML = '<span class="spinner"></span> Creating…'; btn.disabled = true;
+    try {
+      const res = await fetch(API_BASE + 'api/v1/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, email, password: pass })
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Registration failed'); }
+      document.getElementById('reg-success').textContent = 'Account created! You can now sign in.';
+      document.getElementById('reg-success').style.display = 'block';
+      toast('Account created! 🎉', 'suc');
+      setTimeout(() => { App.toggleAuthMode('login'); document.getElementById('login-email').value = email; }, 2000);
+    } catch(e) {
+      errEl.textContent = e.message; errEl.style.display = 'block';
+      toast('Registration failed: ' + e.message, 'err');
+    } finally {
+      btn.innerHTML = 'Create Account'; btn.disabled = false;
+    }
+  },
 
-       async continueAsGuest() {
-      const btn = document.getElementById('guest-btn');
-      if (btn) { btn.innerHTML = '<span class="spinner"></span> Joining as Guest…'; btn.disabled = true; }
-      try {
-        const data = await apiFetch('api/v1/auth/guest', { method: 'POST' });
-        this._saveAuthTokens(data);
-        State.user = data.user;
-        State.isAdmin = data.user?.is_superuser;
-        document.getElementById('auth-view')?.classList.add('hidden');
-        this._afterLogin();
-        toast('Welcome! You are now using a guest session.', 'suc');
-      } catch (e) {
-        toast('Guest access failed: ' + e.message, 'err');
-      } finally {
-        if (btn) { btn.innerHTML = 'Continue as Guest'; btn.disabled = false; }
-      }
-    },
+  // ── After Login ────────────────────────────────────
+  _afterLogin() {
+    this._updateUserUI();
+    if (State.isAdmin) {
+      document.getElementById('admin-toggle').classList.remove('hidden');
+      document.getElementById('admin-toggle-mob').classList.remove('hidden');
+    }
+    this.loadSessions();
+    this._updateServerStatus();
+    this._showWelcome();
+    // push initial history state
+    history.replaceState({ view: 'chat' }, '', window.location.href);
+  },
 
-    _saveAuthTokens(data) {
-      if (data?.access_token) {
-        State.token = data.access_token;
-        localStorage.setItem('tesseract_token', data.access_token);
-      }
-      if (data?.refresh_token) {
-        State.refreshToken = data.refresh_token;
-        localStorage.setItem('tesseract_refresh', data.refresh_token);
-      }
-    },
+  // ── Guest ──────────────────────────────────────────
+  async continueAsGuest() {
+    const btn = document.getElementById('guest-btn');
+    if (btn) { btn.innerHTML = '<span class="spinner"></span> Joining as Guest…'; btn.disabled = true; }
+    try {
+      const data = await apiFetch('api/v1/auth/guest', { method: 'POST' });
+      this._saveAuthTokens(data);
+      State.user    = data.user;
+      State.isAdmin = data.user?.is_superuser;
+      document.getElementById('auth-view')?.classList.add('hidden');
+      this._afterLogin();
+      toast('Welcome! You are now using a guest session.', 'suc');
+    } catch(e) {
+      toast('Guest access failed: ' + e.message, 'err');
+    } finally {
+      if (btn) { btn.innerHTML = 'Continue as Guest'; btn.disabled = false; }
+    }
+  },
 
-    _showWelcome() {
-      const container = document.getElementById('chat-history');
-      if (!container) return;
-      if (container.innerHTML.trim() === '' || !container.querySelector('.msg-row')) {
-        container.innerHTML = `
-          <div class="chat-welcome">
-            <div class="chat-welcome-tagline">
-              How can I <span class="accent-word">assist</span> your<br>knowledge today?
-            </div>
-            <p class="chat-welcome-sub">
-              Connect your documents and let Tesseract's neural engine synthesize answers with enterprise-grade precision.
-            </p>
-            <div class="chat-welcome-steps">
-              <div class="chat-welcome-step"><span>📁</span> Upload documents</div>
-              <div class="chat-welcome-step"><span>💬</span> Ask questions</div>
-              <div class="chat-welcome-step"><span>✦</span> Get answers</div>
-            </div>
-          </div>`;
-      }
-    },
+  // ── Save Tokens ────────────────────────────────────
+  _saveAuthTokens(data) {
+    if (data?.access_token) {
+      State.token = data.access_token;
+      localStorage.setItem('tesseract_token', data.access_token);
+    }
+    if (data?.refresh_token) {
+      State.refreshToken = data.refresh_token;
+      localStorage.setItem('tesseract_refresh', data.refresh_token);
+    }
+  },
 
-    _updateUserUI() {
-      const uname = State.user.username || State.user.email || 'User';
-      const initials = uname.slice(0, 2).toUpperCase();
-      const sav = document.getElementById('sidebar-avatar');
-      if (sav) { sav.textContent = initials; }
-      const spn = document.getElementById('sidebar-profile-name');
-      if (spn) { spn.textContent = uname; }
-      const profUser = document.getElementById('prof-username');
-      if (profUser) profUser.value = State.user.username || '';
-      const profEmail = document.getElementById('prof-email');
-      if (profEmail) profEmail.value = State.user.email || '';
-    },
+  // ── Welcome Screen ─────────────────────────────────
+  _showWelcome() {
+    const container = document.getElementById('chat-history');
+    if (!container) return;
+    if (container.innerHTML.trim() === '' || !container.querySelector('.msg-row')) {
+      container.innerHTML = `
+        <div class="chat-welcome">
+          <div class="chat-welcome-tagline">
+            How can I <span class="accent-word">assist</span> your<br>knowledge today?
+          </div>
+          <p class="chat-welcome-sub">
+            Connect your documents and let Tesseract's neural engine synthesize answers with enterprise-grade precision.
+          </p>
+          <div class="chat-welcome-steps">
+            <div class="chat-welcome-step"><span>📁</span> Upload documents</div>
+            <div class="chat-welcome-step"><span>💬</span> Ask questions</div>
+            <div class="chat-welcome-step"><span>✦</span> Get answers</div>
+          </div>
+        </div>`;
+    }
+  },
 
-    logout() {
-      apiFetch('api/v1/auth/logout', { method: 'POST' }).catch(() => {});
-      localStorage.removeItem('tesseract_token'); localStorage.removeItem('tesseract_refresh');
-      State.token = null; State.refreshToken = null; State.user = null; State.sessions = []; State.activeSession = null;
-      document.getElementById('auth-view').classList.remove('hidden');
-      document.getElementById('login-pass').value = '';
-      document.getElementById('auth-error').style.display = 'none';
-      this.closeOverlays();
-      toast('Signed out', 'info');
-      location.reload();
-    },
+  // ── Update User UI ─────────────────────────────────
+  _updateUserUI() {
+    const uname    = State.user.username || State.user.email || 'User';
+    const initials = uname.slice(0, 2).toUpperCase();
+    const sav = document.getElementById('sidebar-avatar');
+    if (sav) sav.textContent = initials;
+    const spn = document.getElementById('sidebar-profile-name');
+    if (spn) spn.textContent = uname;
+    const profUser  = document.getElementById('prof-username');
+    if (profUser) profUser.value = State.user.username || '';
+    const profEmail = document.getElementById('prof-email');
+    if (profEmail) profEmail.value = State.user.email || '';
+  },
 
-    async changePassword() {
-      const curr = document.getElementById('pass-current').value;
-      const nw = document.getElementById('pass-new').value;
-      const errEl = document.getElementById('pass-error');
-      const okEl = document.getElementById('pass-ok');
-      errEl.style.display = 'none'; okEl.style.display = 'none';
-      if (!curr || !nw) { errEl.textContent = 'Both fields required'; errEl.style.display = 'block'; return; }
-      if (nw.length < 8) { errEl.textContent = 'New password must be at least 8 characters'; errEl.style.display = 'block'; return; }
-      try {
-        await apiFetch('api/v1/auth/me/password', { method: 'POST', body: { current_password: curr, new_password: nw } });
-        document.getElementById('pass-current').value = ''; document.getElementById('pass-new').value = '';
-        okEl.textContent = 'Password updated successfully'; okEl.style.display = 'block';
-        toast('Password updated 🔐', 'suc');
-      } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; toast('Update failed: ' + e.message, 'err'); }
-    },
+  // ── Logout ─────────────────────────────────────────
+  logout() {
+    apiFetch('api/v1/auth/logout', { method: 'POST' }).catch(() => {});
+    localStorage.removeItem('tesseract_token');
+    localStorage.removeItem('tesseract_refresh');
+    State.token = null; State.refreshToken = null;
+    State.user  = null; State.sessions = [];
+    State.activeSession = null;
+    Cache.clear(); // امسح كل الـ cache عند logout
+    document.getElementById('auth-view').classList.remove('hidden');
+    document.getElementById('login-pass').value = '';
+    document.getElementById('auth-error').style.display = 'none';
+    this.closeOverlays();
+    toast('Signed out', 'info');
+    location.reload();
+  },
 
-    async loadSessions() {
-      try { const data = await apiFetch('api/v1/sessions'); State.sessions = data || []; this._renderSessionList(); }
-      catch(e) { console.error('loadSessions', e); }
-    },
+  // ── Change Password ────────────────────────────────
+  async changePassword() {
+    const curr  = document.getElementById('pass-current').value;
+    const nw    = document.getElementById('pass-new').value;
+    const errEl = document.getElementById('pass-error');
+    const okEl  = document.getElementById('pass-ok');
+    errEl.style.display = 'none'; okEl.style.display = 'none';
+    if (!curr || !nw) { errEl.textContent = 'Both fields required'; errEl.style.display = 'block'; return; }
+    if (nw.length < 8) { errEl.textContent = 'New password must be at least 8 characters'; errEl.style.display = 'block'; return; }
+    try {
+      await apiFetch('api/v1/auth/me/password', { method: 'POST', body: { current_password: curr, new_password: nw } });
+      document.getElementById('pass-current').value = '';
+      document.getElementById('pass-new').value = '';
+      okEl.textContent = 'Password updated successfully'; okEl.style.display = 'block';
+      toast('Password updated 🔐', 'suc');
+    } catch(e) {
+      errEl.textContent = e.message; errEl.style.display = 'block';
+      toast('Update failed: ' + e.message, 'err');
+    }
+  },
 
-    _renderSessionList() {
-      const list = document.getElementById('session-list');
-      if (!State.sessions.length) {
-        list.innerHTML = '<div style="text-align:center;padding:36px 16px;color:var(--text-dim);font-size:0.88rem;">No sessions yet.<br>Create one to get started.</div>';
+  // ── Load Sessions — with Cache ─────────────────────
+  async loadSessions(forceRefresh = false) {
+    const cacheKey = 'sessions_list';
+    if (!forceRefresh) {
+      const cached = Cache.get(cacheKey);
+      if (cached) {
+        State.sessions = cached;
+        this._renderSessionList();
         return;
       }
-      list.innerHTML = State.sessions.map(s => `
-        <div class="session-item ${State.activeSession?.id === s.id ? 'active' : ''}" onclick="App.selectSession('${s.id}')">
-          <div class="session-content">
-            <span class="session-name">${esc(s.name)}</span>
-            <div class="session-meta">
-              <span>📄 ${s.document_count || 0}</span>
-              <span>💬 ${s.message_count || 0}</span>
-              <span style="width:7px;height:7px;border-radius:50%;background:${s.is_active ? 'var(--success)' : 'var(--text-dim)'};display:inline-block;"></span>
-            </div>
-          </div>
-          <div class="session-actions">
-            <button class="session-action-btn btn-delete" onclick="event.stopPropagation();App.deleteSession('${s.id}')" title="Delete">🗑</button>
-          </div>
-        </div>`).join('');
-    },
-
-    async deleteSession(id) {
-      this.showConfirmModal({
-        title: 'Delete Session',
-        message: 'This will permanently delete the session, all its documents and chat history. This cannot be undone.',
-        type: 'danger',
-        action: async () => {
-          try {
-            await apiFetch(`api/v1/sessions/${id}`, { method: 'DELETE' });
-            toast('Session deleted', 'suc');
-            if (State.activeSession?.id === id) { State.activeSession = null; this._showWelcome(); }
-            this.loadSessions();
-          } catch(e) { toast('Delete failed: ' + e.message, 'err'); }
-        }
-      });
-    },
-
-    openNewSessionModal() {
-      document.getElementById('new-session-name').value = '';
-      document.getElementById('new-session-desc').value = '';
-      const err = document.getElementById('session-modal-err');
-      err.style.display = 'none';
-      document.getElementById('session-modal').classList.add('open');
-      setTimeout(() => document.getElementById('new-session-name').focus(), 80);
-    },
-
-    async createSession() {
-      const name = document.getElementById('new-session-name').value.trim();
-      const desc = document.getElementById('new-session-desc').value.trim();
-      const errEl = document.getElementById('session-modal-err');
-      errEl.style.display = 'none';
-      if (!name) { errEl.textContent = 'Session name is required'; errEl.style.display = 'block'; return; }
-      try {
-        const s = await apiFetch('api/v1/sessions', { method: 'POST', body: { name, description: desc || null } });
-        State.sessions.unshift(s);
-        document.getElementById('session-modal').classList.remove('open');
-        this._renderSessionList();
-        this.selectSession(s.id);
-        toast('Session created: ' + s.name, 'suc');
-      } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; toast('Create failed: ' + e.message, 'err'); }
-    },
-
-    async selectSession(id) {
-      const s = State.sessions.find(x => x.id === id);
-      if (!s) return;
-      State.activeSession = s;
-      this._renderSessionList();
-      document.getElementById('active-session-title').textContent = s.name;
-      document.getElementById('session-hint').textContent = 'Active: ' + s.name;
-      this.closeOverlays();
-      this.closeSidebar();
-      await this._loadChatHistory();
-      if (State.activePanel) this._renderPanelContent(State.activePanel);
-    },
-
-    async _loadChatHistory() {
-      const container = document.getElementById('chat-history');
-      container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim);"><span class="spinner"></span></div>';
-      try {
-        const hist = await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat?page_size=100`);
-        container.innerHTML = '';
-        const turns = hist?.turns || [];
-        if (!turns.length) {
-          container.innerHTML = '<div style="text-align:center;padding:50px;color:var(--text-dim);font-size:0.92rem;">No messages yet. Start chatting! 💬</div>';
-          return;
-        }
-        turns.forEach(t => {
-          if (t.role === 'system') return;
-          this._appendMessageEl(t.role === 'user' ? 'user' : 'ai', t.content, t.source_chunks || [], t.retrieval_strategy, t.latency_ms);
-        });
-        container.scrollTop = container.scrollHeight;
-      } catch(e) { container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--error);">${esc(e.message)}</div>`; }
-    },
-
-    async sendMessage() {
-      if (!State.activeSession) { toast('Create or select a session first', 'warn'); return; }
-      if (State.streaming) return;
-      const inp = document.getElementById('chat-input');
-      const q = inp.value.trim();
-      if (!q) return;
-      inp.value = '';
-      const strategy = document.getElementById('retrieval-strategy').value;
-      const container = document.getElementById('chat-history');
-      const welcome = container.querySelector('.chat-welcome');
-      if (welcome) welcome.remove();
-      this._appendMessageEl('user', q);
-      State.streaming = true;
-      document.getElementById('send-btn').disabled = true;
-      document.getElementById('streaming-status').innerHTML = '<span class="spinner"></span> Thinking…';
-
-      const typingId = 'typing-' + Date.now();
-      const tw = document.createElement('div');
-      tw.id = typingId;
-      tw.className = 'msg-row';
-      tw.innerHTML = `
-        <div class="msg-avatar ai-av">${AI_AVATAR_SVG}</div>
-        <div class="msg ai"><span style="opacity:.5;font-size:0.88rem;">● &nbsp;● &nbsp;●</span></div>`;
-      container.appendChild(tw);
-      container.scrollTop = container.scrollHeight;
-      try {
-        const resp = await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat`, { method: 'POST', body: { question: q, strategy, show_context: true } });
-        document.getElementById(typingId)?.remove();
-        this._appendMessageEl('ai', resp.answer, resp.sources || [], resp.strategy_used, resp.total_latency_ms);
-        if (State.activeSession) { State.activeSession.message_count = (State.activeSession.message_count || 0) + 2; this._renderSessionList(); }
-        container.scrollTop = container.scrollHeight;
-      } catch(e) { document.getElementById(typingId)?.remove(); this._appendMessageEl('ai', '⚠️ ' + e.message); }
-      finally { State.streaming = false; document.getElementById('send-btn').disabled = false; document.getElementById('streaming-status').textContent = ''; }
-    },
-
-    async clearChat() {
-      if (!State.activeSession) { toast('No active session', 'warn'); return; }
-      this.showConfirmModal({
-        title: 'Clear Chat History',
-        message: 'Clear all messages in this session? This cannot be undone.',
-        type: 'danger',
-        action: async () => {
-          try {
-            await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat`, { method: 'DELETE' });
-            await this._loadChatHistory();
-            toast('Chat cleared', 'suc');
-          } catch(e) { toast('Clear failed: ' + e.message, 'err'); }
-        }
-      });
-    },
-
-    _getUserInitials() {
-      if (!State.user) return '?';
-      return (State.user.username || State.user.email || 'U').slice(0, 2).toUpperCase();
-    },
-
-    _appendMessageEl(role, content, sources = [], strategy = null, latency = null) {
-      const container = document.getElementById('chat-history');
-      const row = document.createElement('div');
-      row.className = `msg-row ${role}`;
-
-      const avatarDiv = document.createElement('div');
-      if (role === 'user') {
-        avatarDiv.className = 'msg-avatar user-av';
-        avatarDiv.textContent = this._getUserInitials();
-      } else {
-        avatarDiv.className = 'msg-avatar ai-av';
-        avatarDiv.innerHTML = AI_AVATAR_SVG;
-      }
-
-      const div = document.createElement('div');
-      div.className = `msg ${role}`;
-
-      let metaHtml = '';
-      if (role === 'ai' && (strategy || latency)) {
-        metaHtml = `<div style="font-size:0.68rem;color:var(--text-dim);margin-bottom:7px;display:flex;gap:8px;flex-wrap:wrap;">${strategy ? `<span style="padding:1px 7px;border-radius:8px;background:rgba(123,44,191,0.2);color:#c4a5ff;font-weight:500;">${esc(strategy)}</span>` : ''}${latency ? `<span style="opacity:0.6">${latency}ms</span>` : ''}</div>`;
-      }
-
-      let sourcesHtml = '';
-      if (sources && sources.length) {
-        const srcsJson = esc(JSON.stringify(sources));
-        const tags = sources.map((s,i) => `<span class="source-tag" onclick="App.showSources(${srcsJson})">📄 <span style="font-weight:600">${esc(s.source_doc || `Doc ${i+1}`)}</span><span class="source-score">${Math.round((s.score||0)*100)}%</span></span>`).join('');
-        const toggleId = 'src-toggle-' + Date.now() + Math.random().toString(36).slice(2);
-        sourcesHtml = `
-          <div class="sources-toggle">
-            <button class="sources-toggle-btn" onclick="App._toggleSources('${toggleId}')">
-              <span class="sources-toggle-arrow" id="arr-${toggleId}">▶</span>
-              📚 ${sources.length} source${sources.length > 1 ? 's' : ''}
-            </button>
-            <div class="sources-body" id="${toggleId}">${tags}</div>
-          </div>`;
-      }
-
-      const copyBtn = role === 'ai' ? `<button class="copy-btn" onclick="App.copyMessage(this, '${esc(content).replace(/'/g,"\\'")}')">📋 Copy</button>` : '';
-      div.innerHTML = copyBtn + metaHtml + `<div>${fmtMd(content)}</div>` + sourcesHtml;
-
-      row.appendChild(avatarDiv);
-      row.appendChild(div);
-      container.appendChild(row);
-    },
-
-    _toggleSources(id) {
-      const body = document.getElementById(id);
-      const arrow = document.getElementById('arr-' + id);
-      if (!body) return;
-      const isOpen = body.classList.toggle('open');
-      if (arrow) arrow.classList.toggle('open', isOpen);
-    },
-
-    async copyMessage(btn, text) {
-      try {
-        const decoded = text.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/<br>/g,'\n').replace(/<[^>]*>/g,'');
-        await navigator.clipboard.writeText(decoded);
-        btn.textContent = '✓ Copied'; btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = '📋 Copy'; btn.classList.remove('copied'); }, 2000);
-        toast('Copied 📋', 'suc');
-      } catch { toast('Copy failed', 'err'); }
-    },
-
-    showSources(sources) {
-      if (typeof sources === 'string') { try { sources = JSON.parse(sources); } catch(e) { return; } }
-      document.getElementById('src-modal-content').innerHTML = sources.map((s,i) => `
-        <div class="src-chunk"><div class="src-chunk-header"><div class="src-chunk-doc">📄 ${esc(s.source_doc || 'Source '+(i+1))} <span style="color:var(--text-dim);font-weight:400">· chunk #${s.chunk_index||i}</span></div><div class="src-chunk-score">${Math.round((s.score||0)*100)}%</div></div><div>${esc(s.content||'')}</div></div>`).join('');
-      document.getElementById('src-modal').classList.add('open');
-    },
-
-    togglePanel(type) {
-      const panel = document.getElementById('right-panel');
-      if (State.activePanel === type) { panel.classList.remove('open'); panel.classList.add('hidden'); State.activePanel = null; }
-      else { panel.classList.remove('hidden'); setTimeout(() => panel.classList.add('open'), 10); State.activePanel = type; this._renderPanelContent(type); }
-    },
-    closePanel() { const p = document.getElementById('right-panel'); p.classList.remove('open'); setTimeout(() => p.classList.add('hidden'), 300); State.activePanel = null; },
-
-    async _renderPanelContent(type) {
-      const title = document.getElementById('panel-title');
-      const content = document.getElementById('panel-content');
-      if (type === 'docs') {
-        title.textContent = '📁 Session Documents';
-        content.innerHTML = `
-          <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
-            <span class="upload-icon">⬆️</span>
-            <p style="font-weight:600">Click or drag files here</p>
-            <p class="file-types">PDF · TXT · MD · DOCX</p>
-            <input type="file" id="file-input" style="display:none" multiple accept=".pdf,.txt,.md,.docx,.doc">
-          </div>
-          <div id="pipeline-area" style="display:none;margin-bottom:14px;">
-            <div id="pipe-filename" style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px;"></div>
-            <div class="pipeline-bar">
-              <span class="pipe-step" id="ps-1">Parse</span><span class="pipe-arrow">→</span>
-              <span class="pipe-step" id="ps-2">Chunk</span><span class="pipe-arrow">→</span>
-              <span class="pipe-step" id="ps-3">Embed</span><span class="pipe-arrow">→</span>
-              <span class="pipe-step" id="ps-4">Index</span><span class="pipe-arrow">→</span>
-              <span class="pipe-step" id="ps-5">✅</span>
-            </div>
-          </div>
-          <div id="docs-list"><div style="text-align:center;padding:24px;color:var(--text-dim);"><span class="spinner"></span></div></div>`;
-        this._setupDropzone(); await this._loadDocs();
-      } else if (type === 'eval') {
-        title.textContent = '📊 RAGAS Evaluation';
-        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-dim);"><span class="spinner"></span></div>';
-        await this._loadEval(content);
-      }
-    },
-
-    _setupDropzone() {
-      const dz = document.getElementById('drop-zone'); const fi = document.getElementById('file-input');
-      if (!dz || !fi) return;
-      dz.ondragover = e => { e.preventDefault(); dz.classList.add('drag'); };
-      dz.ondragleave = () => dz.classList.remove('drag');
-      dz.ondrop = e => { e.preventDefault(); dz.classList.remove('drag'); this._handleFiles(e.dataTransfer.files); };
-      fi.onchange = e => this._handleFiles(e.target.files);
-    },
-
-    async _handleFiles(files) {
-      if (!State.activeSession) { toast('Select a session first', 'warn'); return; }
-      for (const f of files) await this._uploadFile(f);
-    },
-
-    async _uploadFile(file) {
-      const pipeArea = document.getElementById('pipeline-area');
-      const pipeName = document.getElementById('pipe-filename');
-      if (pipeArea) { pipeArea.style.display = 'block'; pipeName.textContent = 'Processing: ' + file.name; }
-      [1,2,3,4,5].forEach(i => { const s = document.getElementById('ps-'+i); if(s) s.className = 'pipe-step'; });
-      let step = 1; document.getElementById('ps-1')?.classList.add('active');
-      const iv = setInterval(() => { document.getElementById('ps-'+step)?.classList.replace('active','done'); step++; if (step <= 4) document.getElementById('ps-'+step)?.classList.add('active'); else clearInterval(iv); }, 600);
-      try {
-        const fd = new FormData(); fd.append('file', file);
-        await apiFetch(`api/v1/sessions/${State.activeSession.id}/documents`, { method: 'POST', formData: fd });
-        clearInterval(iv); [1,2,3,4,5].forEach(i => { const s = document.getElementById('ps-'+i); if(s) s.className = 'pipe-step done'; });
-        toast('Uploaded: ' + file.name, 'suc');
-        State.activeSession.document_count = (State.activeSession.document_count || 0) + 1; this._renderSessionList();
-        setTimeout(async () => { if (pipeArea) pipeArea.style.display = 'none'; await this._loadDocs(); }, 1200);
-      } catch(e) { clearInterval(iv); if (pipeArea) pipeArea.style.display = 'none'; toast('Upload failed: ' + e.message, 'err'); }
-    },
-
-    async _loadDocs() {
-      const el = document.getElementById('docs-list');
-      if (!el) return;
-      if (!State.activeSession) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-dim);">No session selected</div>'; return; }
-      try {
-        const docs = await apiFetch(`api/v1/sessions/${State.activeSession.id}/documents?page_size=50`);
-        if (!docs || !docs.length) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-dim);">No documents yet</div>'; return; }
-        const extIcon = x => ({pdf:'📕',txt:'📄',md:'📝',docx:'📘',doc:'📘'}[x?.toLowerCase()]||'📄');
-        el.innerHTML = docs.map(d => `<div class="doc-item"><span style="font-size:1.2rem;">${extIcon(d.file_extension)}</span><div class="doc-item-info"><div class="doc-item-name">${esc(d.filename)}</div><div class="doc-item-meta">${fmtBytes(d.file_size_bytes)} · ${d.chunk_count||0} chunks</div></div><span class="doc-status ${d.status}">${d.status}</span><button class="doc-delete-btn" onclick="App._deleteDoc('${d.id}')" title="Delete">🗑️</button></div>`).join('');
-      } catch(e) { el.innerHTML = `<div style="color:var(--error);font-size:0.88rem;padding:14px;">${esc(e.message)}</div>`; }
-    },
-
-    async _deleteDoc(docId) {
-      if (!State.activeSession) return;
-      this.showConfirmModal({
-        title: 'Delete Document',
-        message: 'Delete this document from the session?',
-        type: 'danger',
-        action: async () => {
-          try {
-            await apiFetch(`api/v1/sessions/${State.activeSession.id}/documents/${docId}`, { method: 'DELETE' });
-            toast('Document deleted', 'suc');
-            State.activeSession.document_count = Math.max(0, (State.activeSession.document_count||1) - 1);
-            this._renderSessionList(); await this._loadDocs();
-          } catch(e) { toast(e.message, 'err'); }
-        }
-      });
-    },
-
-    async _loadEval(container) {
-      if (!State.activeSession) { container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-dim);">Select a session first</div>'; return; }
-      try {
-        const [summary, evals] = await Promise.all([
-          apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation/summary`),
-          apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation`),
-        ]);
-        const metrics = [
-          { label: 'Faithfulness', val: summary.avg_faithfulness },
-          { label: 'Answer Relevancy', val: summary.avg_answer_relevancy },
-          { label: 'Context Precision', val: summary.avg_context_precision },
-          { label: 'Context Recall', val: summary.avg_context_recall },
-        ];
-        const metricsHtml = metrics.map(m => {
-          const pct = m.val != null ? Math.round(m.val) : 0;
-          let cc = 'high'; if (pct < 40) cc = 'low'; else if (pct < 70) cc = 'medium';
-          return `<div class="eval-metric-item"><div class="eval-metric-header"><span class="eval-metric-label">${m.label}</span><span class="eval-metric-value">${m.val != null ? pct+'%' : '—'}</span></div><div class="eval-metric-bar"><div class="eval-metric-fill ${cc}" style="width:${pct}%"></div></div></div>`;
-        }).join('');
-
-        const runEvalBtn = State.isAdmin
-          ? `<button class="new-session-btn" style="font-size:0.82rem;margin-top:10px;" onclick="App._runEval()">⚡ Run Evaluation</button>`
-          : '';
-
-        container.innerHTML = `
-          <div style="text-align:center;padding:14px;background:var(--glass);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;">
-            <div style="font-weight:700;color:var(--accent);margin-bottom:4px;">📊 Evaluation Summary</div>
-            <div style="color:var(--text-dim);font-size:0.85rem;">${summary.total_evaluated||0} turns evaluated</div>
-          </div>
-          <div class="eval-metrics">${metricsHtml}</div>
-          ${runEvalBtn}
-          ${(evals||[]).length ? `
-            <div style="margin-top:18px;font-size:0.78rem;color:var(--text-dim);font-weight:700;margin-bottom:8px;">📋 Recent Results</div>
-            ${(evals||[]).slice(0,5).map(e=>`<div style="padding:10px;border-radius:8px;background:var(--glass);border:1px solid var(--border);margin-bottom:7px;font-size:0.82rem;"><div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;">${e.faithfulness!=null?`<span style="color:var(--accent);font-weight:600">F:${Math.round(e.faithfulness)}%</span>`:''} ${e.answer_relevancy!=null?`<span style="color:#b09aff;font-weight:600">R:${Math.round(e.answer_relevancy)}%</span>`:''} ${e.context_precision!=null?`<span style="color:var(--success);font-weight:600">P:${Math.round(e.context_precision)}%</span>`:''}</div></div>`).join('')}` : ''}`;
-      } catch(e) { container.innerHTML = `<div style="color:var(--error);font-size:0.88rem;padding:14px;">${esc(e.message)}</div>`; }
-    },
-
-    async _runEval() {
-      if (!State.activeSession) return;
-      toast('Running evaluation…', 'info');
-      try {
-        const res = await apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation`, { method: 'POST', body: { session_id: State.activeSession.id, limit: 200 } });
-        toast(`Evaluated ${res?.length||0} turns`, 'suc');
-        const content = document.getElementById('panel-content');
-        if (content) await this._loadEval(content);
-      } catch(e) { toast(e.message, 'err'); }
-    },
-
-    showView(viewId) { this.closeOverlays(); const v = document.getElementById(viewId); if (!v) return; v.classList.add('active'); if (viewId === 'user-dashboard') this._loadUserDashboard(); if (viewId === 'admin-dashboard') this._loadAdminDashboard(); },
-    closeOverlays() { document.querySelectorAll('.overlay-view').forEach(v => v.classList.remove('active')); },
-
-    async _loadUserDashboard() {
-      try {
-        const sessions = await apiFetch('api/v1/sessions'); State.sessions = sessions || []; this._renderSessionList();
-        document.getElementById('u-stat-sessions').textContent = sessions.length;
-        document.getElementById('u-stat-docs').textContent = sessions.reduce((a,s)=>a+(s.document_count||0),0);
-        document.getElementById('u-stat-msgs').textContent = sessions.reduce((a,s)=>a+(s.message_count||0),0);
-        let faithHtml = '—';
-        if (State.activeSession) { try { const sum = await apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation/summary`); if (sum.avg_faithfulness != null) faithHtml = Math.round(sum.avg_faithfulness)+'%'; } catch(e) {} }
-        document.getElementById('u-stat-faith').textContent = faithHtml;
-        const tbody = document.getElementById('u-sessions-tbody');
-        tbody.innerHTML = sessions.map(s => `
-<tr>
-  <td>${esc(s.name)}</td>
-  <td>${s.document_count||0}</td>
-  <td>${s.message_count||0}</td>
-  <td>
-    <button class="icon-btn" style="width:30px;height:30px;font-size:1rem;display:flex;align-items:center;justify-content:center;" onclick="App.selectSession('${s.id}')" title="Open">→</button>
-    <button class="icon-btn" style="width:30px;height:30px;font-size:0.78rem;color:var(--error);" onclick="event.stopPropagation();App.deleteSession('${s.id}')" title="Delete">🗑️</button>
-  </td>
-</tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:24px;">No sessions</td></tr>';
-      } catch(e) { toast(e.message, 'err'); }
-    },
-
-    async _loadAdminDashboard() {
-      try {
-        const dash = await apiFetch('api/v1/admin/dashboard');
-        document.getElementById('a-total-users').textContent = dash.total_users ?? '—';
-        document.getElementById('a-total-sessions').textContent = dash.total_sessions ?? '—';
-        document.getElementById('a-total-docs').textContent = dash.total_documents ?? '—';
-        const gq = dash.global_avg_scores?.faithfulness;
-        document.getElementById('a-global-eval').textContent = gq != null ? Math.round(gq)+'%' : '—';
-      } catch(e) { console.error('admin dash', e); }
-      this.loadAdminUsers();
-    },
-
-    async loadAdminUsers() {
-      const tbody = document.getElementById('admin-table-users');
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;"><span class="spinner"></span></td></tr>';
-      try {
-        const users = await apiFetch('api/v1/admin/users');
-        if (!users || !users.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No users</td></tr>'; return; }
-        tbody.innerHTML = users.map(u => {
-          const scores = u.avg_scores || {};
-          return `<tr style="cursor:pointer;" onclick="App.drillDownUser('${u.id}','${esc(u.username||u.email)}')">
-            <td><div style="font-weight:700;">${esc(u.username||u.email)}</div><div style="font-size:0.75rem;color:var(--text-dim);">${esc(u.email)}</div>${u.is_superuser?'<span class="badge-admin">ADMIN</span>':''}</td>
-            <td><span class="status-dot-inline ${u.is_active?'status-online':'status-offline'}"></span>${u.is_active?'Active':'Inactive'}</td>
-            <td>${u.session_count||0}</td>
-            <td>${scores.faithfulness!=null?Math.round(scores.faithfulness)+'%':'—'}</td>
-            <td onclick="event.stopPropagation()">
-              <button onclick="App._toggleUser('${u.id}',${u.is_active})" style="background:none;border:none;color:${u.is_active?'var(--error)':'var(--success)'};cursor:pointer;font-size:0.82rem;padding:5px 8px;border-radius:6px;">${u.is_active?'Deactivate':'Activate'}</button>
-              ${!u.is_superuser?`<button onclick="App._promoteUser('${u.id}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:0.82rem;padding:5px 8px;">Promote</button>`:`<button onclick="App._demoteUser('${u.id}')" style="background:none;border:none;color:var(--warn);cursor:pointer;font-size:0.82rem;padding:5px 8px;">Demote</button>`}
-              ${!u.is_superuser?`<button onclick="App._deleteUser('${u.id}')" style="background:none;border:none;color:var(--error);cursor:pointer;font-size:0.82rem;padding:5px 8px;" title="Delete">🗑️</button>`:''}
-            </td></tr>`;
-        }).join('');
-      } catch(e) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--error);padding:18px;">${esc(e.message)}</td></tr>`; }
-    },
-
-    async _deleteUser(userId) {
-      this.showConfirmModal({ title: 'Delete User Permanently', message: 'This will delete the user and all their data. Cannot be undone.', type: 'danger',
-        action: async () => { try { await apiFetch(`api/v1/admin/users/${userId}`, { method: 'DELETE' }); toast('User deleted', 'suc'); this.loadAdminUsers(); } catch(e) { toast('Delete failed: '+e.message,'err'); } }
-      });
-    },
-    async _toggleUser(id, isActive) { try { await apiFetch(`api/v1/admin/users/${id}/${isActive?'deactivate':'activate'}`, { method: 'PATCH' }); toast(`User ${isActive?'deactivated':'activated'}`, 'suc'); this.loadAdminUsers(); } catch(e) { toast(e.message,'err'); } },
-    async _promoteUser(id) { try { await apiFetch(`api/v1/admin/users/${id}/promote`, { method: 'PATCH' }); toast('User promoted to admin','suc'); this.loadAdminUsers(); } catch(e) { toast(e.message,'err'); } },
-    async _demoteUser(id) { try { await apiFetch(`api/v1/admin/users/${id}/demote`, { method: 'PATCH' }); toast('User demoted','suc'); this.loadAdminUsers(); } catch(e) { toast(e.message,'err'); } },
-
-    async drillDownUser(userId, username) {
-      State._adminCurrentUserId = userId; State._adminCurrentUser = username;
-      document.getElementById('admin-users-list').classList.add('hidden');
-      document.getElementById('admin-session-detail').classList.add('hidden');
-      document.getElementById('admin-user-detail').classList.remove('hidden');
-      document.getElementById('admin-detail-title').textContent = `Sessions — ${username}`;
-      const tbody = document.getElementById('admin-table-sessions');
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;"><span class="spinner"></span></td></tr>';
-      try {
-        const sessions = await apiFetch(`api/v1/admin/sessions?user_id=${userId}`);
-        if (!sessions || !sessions.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No sessions</td></tr>'; return; }
-        tbody.innerHTML = sessions.map(s => `<tr style="cursor:pointer;" onclick="App.drillDownSession('${s.id}','${esc(s.name)}')"><td style="font-weight:700;">${esc(s.name)}</td><td>${s.message_count||0}</td><td>${s.document_count||0}</td><td><span style="color:${s.is_active?'var(--success)':'var(--text-dim)'}">● ${s.is_active?'Active':'Inactive'}</span></td><td>${new Date(s.created_at).toLocaleDateString()}</td></tr>`).join('');
-      } catch(e) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--error);padding:18px;">${esc(e.message)}</td></tr>`; }
-    },
-
-    async drillDownSession(sessionId, sessionName) {
-      document.getElementById('admin-user-detail').classList.add('hidden');
-      document.getElementById('admin-session-detail').classList.remove('hidden');
-      document.getElementById('admin-session-title').textContent = `Messages — ${sessionName}`;
-      const scoresEl = document.getElementById('admin-session-scores');
-      const tbody = document.getElementById('admin-table-messages');
-      scoresEl.innerHTML = '';
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;"><span class="spinner"></span></td></tr>';
-      try {
-        const [msgs, summary] = await Promise.all([
-          apiFetch(`api/v1/admin/messages?session_id=${sessionId}&page_size=100`),
-          apiFetch(`api/v1/sessions/${sessionId}/evaluation/summary`).catch(()=>null),
-        ]);
-        if (summary) {
-          scoresEl.innerHTML = [{label:'Faithfulness',val:summary.avg_faithfulness},{label:'Relevancy',val:summary.avg_answer_relevancy},{label:'Precision',val:summary.avg_context_precision},{label:'Recall',val:summary.avg_context_recall},{label:'Turns',val:summary.total_evaluated,raw:true}]
-            .map(m=>`<div class="stat-card" style="padding:12px;"><span class="stat-val" style="font-size:1.2rem;">${m.raw?(m.val??'—'):(m.val!=null?Math.round(m.val)+'%':'—')}</span><span class="stat-label">${m.label}</span></div>`).join('');
-        }
-        if (!msgs || !msgs.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No messages</td></tr>'; return; }
-        tbody.innerHTML = msgs.map(m=>`<tr><td><span style="padding:2px 8px;border-radius:8px;font-size:0.72rem;font-weight:700;background:${m.role==='user'?'rgba(59,130,246,0.15)':'rgba(123,44,191,0.15)'};color:${m.role==='user'?'#3b82f6':'#b09aff'}">${m.role==='user'?'User':'AI'}</span></td><td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.content)}</td><td>${m.evaluation?.faithfulness!=null?Math.round(m.evaluation.faithfulness)+'%':'—'}</td><td>${m.evaluation?.answer_relevancy!=null?Math.round(m.evaluation.answer_relevancy)+'%':'—'}</td><td style="font-size:0.78rem;color:var(--text-dim);white-space:nowrap;">${new Date(m.created_at).toLocaleString()}</td></tr>`).join('');
-      } catch(e) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--error);padding:18px;">${esc(e.message)}</td></tr>`; }
-    },
-
-    backToUsers() { document.getElementById('admin-user-detail').classList.add('hidden'); document.getElementById('admin-session-detail').classList.add('hidden'); document.getElementById('admin-users-list').classList.remove('hidden'); },
-    backToUserDetail() { document.getElementById('admin-session-detail').classList.add('hidden'); document.getElementById('admin-user-detail').classList.remove('hidden'); },
-
-    toggleSidebar() {
-      const s = document.getElementById('sidebar');
-      const b = document.getElementById('sidebar-backdrop');
-      s.classList.toggle('open'); b.classList.toggle('open');
-    },
-    closeSidebar() {
-      if (window.innerWidth <= 900) {
-        document.getElementById('sidebar').classList.remove('open');
-        document.getElementById('sidebar-backdrop').classList.remove('open');
-      }
-    },
-
-    toggleTheme() {
-      const html = document.documentElement;
-      if (State.theme === 'dark') { html.setAttribute('data-theme','light'); document.getElementById('theme-text').textContent = 'Light'; State.theme = 'light'; }
-      else { html.removeAttribute('data-theme'); document.getElementById('theme-text').textContent = 'Dark'; State.theme = 'dark'; }
-      localStorage.setItem('tesseract_theme', State.theme);
-    },
-
-    _updateServerStatus() {
-      const dot = document.getElementById('status-dot');
-      const text = document.getElementById('status-text');
-      const update = () => {
-        State.isOnline = navigator.onLine;
-        if (dot) { if (State.isOnline) dot.classList.remove('offline'); else dot.classList.add('offline'); }
-        if (text) { text.textContent = State.isOnline ? 'Online' : 'Offline'; }
-        if (!State.isOnline) { toast('Lost connection', 'warn'); }
-      };
-      window.addEventListener('online', update);
-      window.addEventListener('offline', update);
-      update();
-      setInterval(async () => {
-        try {
-          await fetch(API_BASE + 'health', { method: 'GET', mode: 'no-cors' });
-          if (!State.isOnline) { State.isOnline = true; update(); toast('Connection restored', 'suc'); }
-        } catch {
-          if (State.isOnline) { State.isOnline = false; update(); }
-        }
-      }, 30000);
-    },
-  };
-
-  async function restoreSession() {
-    if (!State.token) return false;
+    }
     try {
-      const me = await apiFetch('api/v1/auth/me');
-      if (me && me.id) { 
-        State.user = me; 
-        State.isAdmin = me.is_superuser; 
-        const authView = document.getElementById('auth-view');
-        if (authView) authView.classList.add('hidden');
-        if (typeof App?._afterLogin === 'function') App._afterLogin(); 
-        toast('Session restored ✨', 'suc'); 
-        return true; 
+      const data     = await apiFetch('api/v1/sessions');
+      State.sessions = data || [];
+      Cache.set(cacheKey, State.sessions, 60_000); // cache دقيقة
+      this._renderSessionList();
+    } catch(e) {
+      console.error('loadSessions', e);
+    }
+  },
+
+  // ── Render Session List ────────────────────────────
+  _renderSessionList() {
+    const list = document.getElementById('session-list');
+    if (!State.sessions.length) {
+      list.innerHTML = '<div style="text-align:center;padding:36px 16px;color:var(--text-dim);font-size:0.88rem;">No sessions yet.<br>Create one to get started.</div>';
+      return;
+    }
+    list.innerHTML = State.sessions.map(s => `
+      <div class="session-item ${State.activeSession?.id === s.id ? 'active' : ''}" onclick="App.selectSession('${s.id}')">
+        <div class="session-content">
+          <span class="session-name">${esc(s.name)}</span>
+          <div class="session-meta">
+            <span>📄 ${s.document_count || 0}</span>
+            <span>💬 ${s.message_count  || 0}</span>
+            <span style="width:7px;height:7px;border-radius:50%;background:${s.is_active ? 'var(--success)' : 'var(--text-dim)'};display:inline-block;"></span>
+          </div>
+        </div>
+        <div class="session-actions">
+          <button class="session-action-btn btn-delete" onclick="event.stopPropagation();App.deleteSession('${s.id}')" title="Delete">🗑</button>
+        </div>
+      </div>`).join('');
+  },
+
+  // ── Delete Session ─────────────────────────────────
+  async deleteSession(id) {
+    this.showConfirmModal({
+      title: 'Delete Session',
+      message: 'This will permanently delete the session, all its documents and chat history. This cannot be undone.',
+      type: 'danger',
+      action: async () => {
+        try {
+          await apiFetch(`api/v1/sessions/${id}`, { method: 'DELETE' });
+          Cache.invalidate('sessions_list');     // امسح الـ cache
+          Cache.invalidate('user_dashboard');
+          toast('Session deleted', 'suc');
+          if (State.activeSession?.id === id) {
+            State.activeSession = null;
+            this._showWelcome();
+            history.replaceState({ view: 'chat' }, '', window.location.href);
+          }
+          this.loadSessions(true);
+        } catch(e) { toast('Delete failed: ' + e.message, 'err'); }
       }
-    } catch(e) { 
-      console.warn('Session restore failed:', e.message);
-      if (e.message.includes('expired') || e.message.includes('Session expired')) {
-        localStorage.removeItem('tesseract_token'); 
-        localStorage.removeItem('tesseract_refresh'); 
+    });
+  },
+
+  // ── New Session Modal ──────────────────────────────
+  openNewSessionModal() {
+    document.getElementById('new-session-name').value = '';
+    document.getElementById('new-session-desc').value = '';
+    const err = document.getElementById('session-modal-err');
+    err.style.display = 'none';
+    document.getElementById('session-modal').classList.add('open');
+    setTimeout(() => document.getElementById('new-session-name').focus(), 80);
+  },
+
+  // ── Create Session ─────────────────────────────────
+  async createSession() {
+    const name  = document.getElementById('new-session-name').value.trim();
+    const desc  = document.getElementById('new-session-desc').value.trim();
+    const errEl = document.getElementById('session-modal-err');
+    errEl.style.display = 'none';
+    if (!name) { errEl.textContent = 'Session name is required'; errEl.style.display = 'block'; return; }
+    try {
+      const s = await apiFetch('api/v1/sessions', { method: 'POST', body: { name, description: desc || null } });
+      Cache.invalidate('sessions_list');   // امسح الـ cache عشان تتجيب الـ list الجديدة
+      Cache.invalidate('user_dashboard');
+      State.sessions.unshift(s);
+      document.getElementById('session-modal').classList.remove('open');
+      this._renderSessionList();
+      this.selectSession(s.id);
+      toast('Session created: ' + s.name, 'suc');
+    } catch(e) {
+      errEl.textContent = e.message; errEl.style.display = 'block';
+      toast('Create failed: ' + e.message, 'err');
+    }
+  },
+
+  // ── Select Session ─────────────────────────────────
+  async selectSession(id) {
+    const s = State.sessions.find(x => x.id === id);
+    if (!s) return;
+    State.activeSession = s;
+    this._renderSessionList();
+    document.getElementById('active-session-title').textContent = s.name;
+    document.getElementById('session-hint').textContent = 'Active: ' + s.name;
+    this.closeOverlays();
+    this.closeSidebar();
+    // push للـ browser history
+    history.pushState({ view: 'chat', sessionId: id }, '', `#session-${id}`);
+    await this._loadChatHistory();
+    if (State.activePanel) this._renderPanelContent(State.activePanel);
+  },
+
+  // ── Load Chat History ──────────────────────────────
+  async _loadChatHistory() {
+    const container = document.getElementById('chat-history');
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim);"><span class="spinner"></span></div>';
+    try {
+      const hist  = await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat?page_size=100`);
+      container.innerHTML = '';
+      const turns = hist?.turns || [];
+      if (!turns.length) {
+        container.innerHTML = '<div style="text-align:center;padding:50px;color:var(--text-dim);font-size:0.92rem;">No messages yet. Start chatting! 💬</div>';
+        return;
+      }
+      turns.forEach(t => {
+        if (t.role === 'system') return;
+        this._appendMessageEl(t.role === 'user' ? 'user' : 'ai', t.content, t.source_chunks || [], t.retrieval_strategy, t.latency_ms);
+      });
+      container.scrollTop = container.scrollHeight;
+    } catch(e) {
+      container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--error);">${esc(e.message)}</div>`;
+    }
+  },
+
+  // ── Send Message ───────────────────────────────────
+  async sendMessage() {
+    if (!State.activeSession) { toast('Create or select a session first', 'warn'); return; }
+    if (State.streaming) return;
+    const inp      = document.getElementById('chat-input');
+    const q        = inp.value.trim();
+    if (!q) return;
+    inp.value = '';
+    const strategy = document.getElementById('retrieval-strategy').value;
+    const container = document.getElementById('chat-history');
+    const welcome   = container.querySelector('.chat-welcome');
+    if (welcome) welcome.remove();
+    this._appendMessageEl('user', q);
+    State.streaming = true;
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('streaming-status').innerHTML = '<span class="spinner"></span> Thinking…';
+
+    const typingId = 'typing-' + Date.now();
+    const tw = document.createElement('div');
+    tw.id = typingId; tw.className = 'msg-row';
+    tw.innerHTML = `
+      <div class="msg-avatar ai-av">${AI_AVATAR_SVG}</div>
+      <div class="msg ai"><span style="opacity:.5;font-size:0.88rem;">● &nbsp;● &nbsp;●</span></div>`;
+    container.appendChild(tw);
+    container.scrollTop = container.scrollHeight;
+
+    try {
+      const resp = await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat`, {
+        method: 'POST',
+        body: { question: q, strategy, show_context: true }
+      });
+      document.getElementById(typingId)?.remove();
+      this._appendMessageEl('ai', resp.answer, resp.sources || [], resp.strategy_used, resp.total_latency_ms);
+      // بدّل الـ session cache عشان message_count اتغير
+      if (State.activeSession) {
+        State.activeSession.message_count = (State.activeSession.message_count || 0) + 2;
+        Cache.invalidate('sessions_list');
+        Cache.invalidate('user_dashboard');
+        this._renderSessionList();
+      }
+      container.scrollTop = container.scrollHeight;
+    } catch(e) {
+      document.getElementById(typingId)?.remove();
+      this._appendMessageEl('ai', '⚠️ ' + e.message);
+    } finally {
+      State.streaming = false;
+      document.getElementById('send-btn').disabled = false;
+      document.getElementById('streaming-status').textContent = '';
+    }
+  },
+
+  // ── Clear Chat ─────────────────────────────────────
+  async clearChat() {
+    if (!State.activeSession) { toast('No active session', 'warn'); return; }
+    this.showConfirmModal({
+      title: 'Clear Chat History',
+      message: 'Clear all messages in this session? This cannot be undone.',
+      type: 'danger',
+      action: async () => {
+        try {
+          await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat`, { method: 'DELETE' });
+          Cache.invalidate('sessions_list');
+          Cache.invalidate('user_dashboard');
+          await this._loadChatHistory();
+          toast('Chat cleared', 'suc');
+        } catch(e) { toast('Clear failed: ' + e.message, 'err'); }
+      }
+    });
+  },
+
+  // ── Get User Initials ──────────────────────────────
+  _getUserInitials() {
+    if (!State.user) return '?';
+    return (State.user.username || State.user.email || 'U').slice(0, 2).toUpperCase();
+  },
+
+  // ── Append Message ─────────────────────────────────
+  _appendMessageEl(role, content, sources = [], strategy = null, latency = null) {
+    const container = document.getElementById('chat-history');
+    const row = document.createElement('div');
+    row.className = `msg-row ${role}`;
+
+    const avatarDiv = document.createElement('div');
+    if (role === 'user') {
+      avatarDiv.className = 'msg-avatar user-av';
+      avatarDiv.textContent = this._getUserInitials();
+    } else {
+      avatarDiv.className = 'msg-avatar ai-av';
+      avatarDiv.innerHTML = AI_AVATAR_SVG;
+    }
+
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+
+    let metaHtml = '';
+    if (role === 'ai' && (strategy || latency)) {
+      metaHtml = `<div style="font-size:0.68rem;color:var(--text-dim);margin-bottom:7px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${strategy ? `<span style="padding:1px 7px;border-radius:8px;background:rgba(123,44,191,0.2);color:#c4a5ff;font-weight:500;">${esc(strategy)}</span>` : ''}
+        ${latency  ? `<span style="opacity:0.6">${latency}ms</span>` : ''}
+      </div>`;
+    }
+
+    let sourcesHtml = '';
+    if (sources && sources.length) {
+      const srcsJson  = esc(JSON.stringify(sources));
+      const tags      = sources.map((s,i) =>
+        `<span class="source-tag" onclick="App.showSources(${srcsJson})">📄 <span style="font-weight:600">${esc(s.source_doc || `Doc ${i+1}`)}</span><span class="source-score">${Math.round((s.score||0)*100)}%</span></span>`
+      ).join('');
+      const toggleId = 'src-toggle-' + Date.now() + Math.random().toString(36).slice(2);
+      sourcesHtml = `
+        <div class="sources-toggle">
+          <button class="sources-toggle-btn" onclick="App._toggleSources('${toggleId}')">
+            <span class="sources-toggle-arrow" id="arr-${toggleId}">▶</span>
+            📚 ${sources.length} source${sources.length > 1 ? 's' : ''}
+          </button>
+          <div class="sources-body" id="${toggleId}">${tags}</div>
+        </div>`;
+    }
+
+    const copyBtn = role === 'ai'
+      ? `<button class="copy-btn" onclick="App.copyMessage(this, '${esc(content).replace(/'/g,"\\'")}')">📋 Copy</button>`
+      : '';
+    div.innerHTML = copyBtn + metaHtml + `<div>${fmtMd(content)}</div>` + sourcesHtml;
+
+    row.appendChild(avatarDiv);
+    row.appendChild(div);
+    container.appendChild(row);
+  },
+
+  // ── Toggle Sources ─────────────────────────────────
+  _toggleSources(id) {
+    const body  = document.getElementById(id);
+    const arrow = document.getElementById('arr-' + id);
+    if (!body) return;
+    const isOpen = body.classList.toggle('open');
+    if (arrow) arrow.classList.toggle('open', isOpen);
+  },
+
+  // ── Copy Message ───────────────────────────────────
+  async copyMessage(btn, text) {
+    try {
+      const decoded = text
+        .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+        .replace(/<br>/g,'\n').replace(/<[^>]*>/g,'');
+      await navigator.clipboard.writeText(decoded);
+      btn.textContent = '✓ Copied'; btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '📋 Copy'; btn.classList.remove('copied'); }, 2000);
+      toast('Copied 📋', 'suc');
+    } catch { toast('Copy failed', 'err'); }
+  },
+
+  // ── Show Sources Modal ─────────────────────────────
+  showSources(sources) {
+    if (typeof sources === 'string') { try { sources = JSON.parse(sources); } catch(e) { return; } }
+    document.getElementById('src-modal-content').innerHTML = sources.map((s,i) => `
+      <div class="src-chunk">
+        <div class="src-chunk-header">
+          <div class="src-chunk-doc">📄 ${esc(s.source_doc || 'Source '+(i+1))} <span style="color:var(--text-dim);font-weight:400">· chunk #${s.chunk_index||i}</span></div>
+          <div class="src-chunk-score">${Math.round((s.score||0)*100)}%</div>
+        </div>
+        <div>${esc(s.content||'')}</div>
+      </div>`).join('');
+    document.getElementById('src-modal').classList.add('open');
+  },
+
+  // ── Right Panel ────────────────────────────────────
+  togglePanel(type) {
+    const panel = document.getElementById('right-panel');
+    if (State.activePanel === type) {
+      panel.classList.remove('open');
+      panel.classList.add('hidden');
+      State.activePanel = null;
+    } else {
+      panel.classList.remove('hidden');
+      setTimeout(() => panel.classList.add('open'), 10);
+      State.activePanel = type;
+      this._renderPanelContent(type);
+    }
+  },
+  closePanel() {
+    const p = document.getElementById('right-panel');
+    p.classList.remove('open');
+    setTimeout(() => p.classList.add('hidden'), 300);
+    State.activePanel = null;
+  },
+
+  // ── Panel Content ──────────────────────────────────
+  async _renderPanelContent(type) {
+    const title   = document.getElementById('panel-title');
+    const content = document.getElementById('panel-content');
+    if (type === 'docs') {
+      title.textContent = '📁 Session Documents';
+      content.innerHTML = `
+        <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+          <span class="upload-icon">⬆️</span>
+          <p style="font-weight:600">Click or drag files here</p>
+          <p class="file-types">PDF · TXT · MD · DOCX</p>
+          <input type="file" id="file-input" style="display:none" multiple accept=".pdf,.txt,.md,.docx,.doc">
+        </div>
+        <div id="pipeline-area" style="display:none;margin-bottom:14px;">
+          <div id="pipe-filename" style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px;"></div>
+          <div class="pipeline-bar">
+            <span class="pipe-step" id="ps-1">Parse</span><span class="pipe-arrow">→</span>
+            <span class="pipe-step" id="ps-2">Chunk</span><span class="pipe-arrow">→</span>
+            <span class="pipe-step" id="ps-3">Embed</span><span class="pipe-arrow">→</span>
+            <span class="pipe-step" id="ps-4">Index</span><span class="pipe-arrow">→</span>
+            <span class="pipe-step" id="ps-5">✅</span>
+          </div>
+        </div>
+        <div id="docs-list"><div style="text-align:center;padding:24px;color:var(--text-dim);"><span class="spinner"></span></div></div>`;
+      this._setupDropzone();
+      await this._loadDocs();
+    } else if (type === 'eval') {
+      title.textContent = '📊 RAGAS Evaluation';
+      content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-dim);"><span class="spinner"></span></div>';
+      await this._loadEval(content);
+    }
+  },
+
+  // ── Dropzone ───────────────────────────────────────
+  _setupDropzone() {
+    const dz = document.getElementById('drop-zone');
+    const fi = document.getElementById('file-input');
+    if (!dz || !fi) return;
+    dz.ondragover  = e => { e.preventDefault(); dz.classList.add('drag'); };
+    dz.ondragleave = () => dz.classList.remove('drag');
+    dz.ondrop      = e => { e.preventDefault(); dz.classList.remove('drag'); this._handleFiles(e.dataTransfer.files); };
+    fi.onchange    = e => this._handleFiles(e.target.files);
+  },
+
+  async _handleFiles(files) {
+    if (!State.activeSession) { toast('Select a session first', 'warn'); return; }
+    for (const f of files) await this._uploadFile(f);
+  },
+
+  async _uploadFile(file) {
+    const pipeArea = document.getElementById('pipeline-area');
+    const pipeName = document.getElementById('pipe-filename');
+    if (pipeArea) { pipeArea.style.display = 'block'; pipeName.textContent = 'Processing: ' + file.name; }
+    [1,2,3,4,5].forEach(i => { const s = document.getElementById('ps-'+i); if(s) s.className = 'pipe-step'; });
+    let step = 1;
+    document.getElementById('ps-1')?.classList.add('active');
+    const iv = setInterval(() => {
+      document.getElementById('ps-'+step)?.classList.replace('active','done');
+      step++;
+      if (step <= 4) document.getElementById('ps-'+step)?.classList.add('active');
+      else clearInterval(iv);
+    }, 600);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      await apiFetch(`api/v1/sessions/${State.activeSession.id}/documents`, { method: 'POST', formData: fd });
+      clearInterval(iv);
+      [1,2,3,4,5].forEach(i => { const s = document.getElementById('ps-'+i); if(s) s.className = 'pipe-step done'; });
+      toast('Uploaded: ' + file.name, 'suc');
+      State.activeSession.document_count = (State.activeSession.document_count || 0) + 1;
+      Cache.invalidate('sessions_list');
+      Cache.invalidate('user_dashboard');
+      this._renderSessionList();
+      setTimeout(async () => { if (pipeArea) pipeArea.style.display = 'none'; await this._loadDocs(); }, 1200);
+    } catch(e) {
+      clearInterval(iv);
+      if (pipeArea) pipeArea.style.display = 'none';
+      toast('Upload failed: ' + e.message, 'err');
+    }
+  },
+
+  async _loadDocs() {
+    const el = document.getElementById('docs-list');
+    if (!el) return;
+    if (!State.activeSession) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-dim);">No session selected</div>'; return; }
+    try {
+      const docs = await apiFetch(`api/v1/sessions/${State.activeSession.id}/documents?page_size=50`);
+      if (!docs || !docs.length) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-dim);">No documents yet</div>'; return; }
+      const extIcon = x => ({pdf:'📕',txt:'📄',md:'📝',docx:'📘',doc:'📘'}[x?.toLowerCase()]||'📄');
+      el.innerHTML = docs.map(d =>
+        `<div class="doc-item">
+          <span style="font-size:1.2rem;">${extIcon(d.file_extension)}</span>
+          <div class="doc-item-info">
+            <div class="doc-item-name">${esc(d.filename)}</div>
+            <div class="doc-item-meta">${fmtBytes(d.file_size_bytes)} · ${d.chunk_count||0} chunks</div>
+          </div>
+          <span class="doc-status ${d.status}">${d.status}</span>
+          <button class="doc-delete-btn" onclick="App._deleteDoc('${d.id}')" title="Delete">🗑️</button>
+        </div>`
+      ).join('');
+    } catch(e) {
+      el.innerHTML = `<div style="color:var(--error);font-size:0.88rem;padding:14px;">${esc(e.message)}</div>`;
+    }
+  },
+
+  async _deleteDoc(docId) {
+    if (!State.activeSession) return;
+    this.showConfirmModal({
+      title: 'Delete Document',
+      message: 'Delete this document from the session?',
+      type: 'danger',
+      action: async () => {
+        try {
+          await apiFetch(`api/v1/sessions/${State.activeSession.id}/documents/${docId}`, { method: 'DELETE' });
+          toast('Document deleted', 'suc');
+          State.activeSession.document_count = Math.max(0, (State.activeSession.document_count||1) - 1);
+          Cache.invalidate('sessions_list');
+          Cache.invalidate('user_dashboard');
+          this._renderSessionList();
+          await this._loadDocs();
+        } catch(e) { toast(e.message, 'err'); }
+      }
+    });
+  },
+
+  // ── Evaluation Panel ───────────────────────────────
+  async _loadEval(container) {
+    if (!State.activeSession) { container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-dim);">Select a session first</div>'; return; }
+    try {
+      const [summary, evals] = await Promise.all([
+        apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation/summary`),
+        apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation`),
+      ]);
+      const metrics = [
+        { label: 'Faithfulness',      val: summary.avg_faithfulness },
+        { label: 'Answer Relevancy',  val: summary.avg_answer_relevancy },
+        { label: 'Context Precision', val: summary.avg_context_precision },
+        { label: 'Context Recall',    val: summary.avg_context_recall },
+      ];
+      const metricsHtml = metrics.map(m => {
+        const pct = m.val != null ? Math.round(m.val) : 0;
+        let cc = 'high'; if (pct < 40) cc = 'low'; else if (pct < 70) cc = 'medium';
+        return `<div class="eval-metric-item">
+          <div class="eval-metric-header">
+            <span class="eval-metric-label">${m.label}</span>
+            <span class="eval-metric-value">${m.val != null ? pct+'%' : '—'}</span>
+          </div>
+          <div class="eval-metric-bar"><div class="eval-metric-fill ${cc}" style="width:${pct}%"></div></div>
+        </div>`;
+      }).join('');
+
+      const runEvalBtn = State.isAdmin
+        ? `<button class="new-session-btn" style="font-size:0.82rem;margin-top:10px;" onclick="App._runEval()">⚡ Run Evaluation</button>`
+        : '';
+
+      container.innerHTML = `
+        <div style="text-align:center;padding:14px;background:var(--glass);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;">
+          <div style="font-weight:700;color:var(--accent);margin-bottom:4px;">📊 Evaluation Summary</div>
+          <div style="color:var(--text-dim);font-size:0.85rem;">${summary.total_evaluated||0} turns evaluated</div>
+        </div>
+        <div class="eval-metrics">${metricsHtml}</div>
+        ${runEvalBtn}
+        ${(evals||[]).length ? `
+          <div style="margin-top:18px;font-size:0.78rem;color:var(--text-dim);font-weight:700;margin-bottom:8px;">📋 Recent Results</div>
+          ${(evals||[]).slice(0,5).map(e=>`
+            <div style="padding:10px;border-radius:8px;background:var(--glass);border:1px solid var(--border);margin-bottom:7px;font-size:0.82rem;">
+              <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;">
+                ${e.faithfulness!=null       ? `<span style="color:var(--accent);font-weight:600">F:${Math.round(e.faithfulness)}%</span>` : ''}
+                ${e.answer_relevancy!=null   ? `<span style="color:#b09aff;font-weight:600">R:${Math.round(e.answer_relevancy)}%</span>` : ''}
+                ${e.context_precision!=null  ? `<span style="color:var(--success);font-weight:600">P:${Math.round(e.context_precision)}%</span>` : ''}
+              </div>
+            </div>`).join('')}` : ''}`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--error);font-size:0.88rem;padding:14px;">${esc(e.message)}</div>`;
+    }
+  },
+
+  async _runEval() {
+    if (!State.activeSession) return;
+    toast('Running evaluation…', 'info');
+    try {
+      const res = await apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation`, {
+        method: 'POST',
+        body: { session_id: State.activeSession.id, limit: 200 }
+      });
+      toast(`Evaluated ${res?.length||0} turns`, 'suc');
+      const content = document.getElementById('panel-content');
+      if (content) await this._loadEval(content);
+    } catch(e) { toast(e.message, 'err'); }
+  },
+
+  // ── Views / Navigation ─────────────────────────────
+  // استخدم _navigate لكل الـ views عشان الـ history يشتغل
+  _navigate(viewId, pushState = true) {
+    this.closeOverlays();
+    if (viewId === 'chat') {
+      if (pushState) history.pushState({ view: 'chat', sessionId: State.activeSession?.id }, '', `#chat`);
+      return;
+    }
+    const v = document.getElementById(viewId);
+    if (!v) return;
+    v.classList.add('active');
+    if (pushState) history.pushState({ view: viewId }, '', `#${viewId}`);
+    if (viewId === 'user-dashboard')  this._loadUserDashboard();
+    if (viewId === 'admin-dashboard') this._loadAdminDashboard();
+  },
+
+  showView(viewId) {
+    this._navigate(viewId);
+  },
+
+  closeOverlays() {
+    document.querySelectorAll('.overlay-view').forEach(v => v.classList.remove('active'));
+  },
+
+  // ── User Dashboard — with Cache ────────────────────
+  async _loadUserDashboard() {
+    const cacheKey = 'user_dashboard';
+    const cached   = Cache.get(cacheKey);
+    if (cached) {
+      this._renderDashboardData(cached);
+      return;
+    }
+    try {
+      const sessions = await apiFetch('api/v1/sessions');
+      State.sessions = sessions || [];
+      Cache.set(cacheKey, sessions, 120_000); // cache دقيقتين
+      this._renderDashboardData(sessions);
+      this._renderSessionList();
+    } catch(e) { toast(e.message, 'err'); }
+  },
+
+  _renderDashboardData(sessions) {
+    document.getElementById('u-stat-sessions').textContent = sessions.length;
+    document.getElementById('u-stat-docs').textContent = sessions.reduce((a,s)=>a+(s.document_count||0),0);
+    document.getElementById('u-stat-msgs').textContent = sessions.reduce((a,s)=>a+(s.message_count||0),0);
+    let faithHtml = '—';
+    if (State.activeSession) {
+      apiFetch(`api/v1/sessions/${State.activeSession.id}/evaluation/summary`)
+        .then(sum => { if (sum?.avg_faithfulness != null) document.getElementById('u-stat-faith').textContent = Math.round(sum.avg_faithfulness)+'%'; })
+        .catch(() => {});
+    }
+    document.getElementById('u-stat-faith').textContent = faithHtml;
+    const tbody = document.getElementById('u-sessions-tbody');
+    tbody.innerHTML = sessions.map(s => `
+      <tr>
+        <td>${esc(s.name)}</td>
+        <td>${s.document_count||0}</td>
+        <td>${s.message_count||0}</td>
+        <td>
+          <button class="icon-btn" style="width:30px;height:30px;font-size:1rem;display:flex;align-items:center;justify-content:center;" onclick="App.selectSession('${s.id}')" title="Open">→</button>
+          <button class="icon-btn" style="width:30px;height:30px;font-size:0.78rem;color:var(--error);" onclick="event.stopPropagation();App.deleteSession('${s.id}')" title="Delete">🗑️</button>
+        </td>
+      </tr>`).join('')
+      || '<tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:24px;">No sessions</td></tr>';
+  },
+
+  // ── Admin Dashboard ────────────────────────────────
+  async _loadAdminDashboard() {
+    try {
+      const dash = await apiFetch('api/v1/admin/dashboard');
+      document.getElementById('a-total-users').textContent    = dash.total_users     ?? '—';
+      document.getElementById('a-total-sessions').textContent = dash.total_sessions  ?? '—';
+      document.getElementById('a-total-docs').textContent     = dash.total_documents ?? '—';
+      const gq = dash.global_avg_scores?.faithfulness;
+      document.getElementById('a-global-eval').textContent    = gq != null ? Math.round(gq)+'%' : '—';
+    } catch(e) { console.error('admin dash', e); }
+    this.loadAdminUsers();
+  },
+
+  async loadAdminUsers() {
+    const tbody = document.getElementById('admin-table-users');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;"><span class="spinner"></span></td></tr>';
+    try {
+      const users = await apiFetch('api/v1/admin/users');
+      if (!users || !users.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No users</td></tr>'; return; }
+      tbody.innerHTML = users.map(u => {
+        const scores = u.avg_scores || {};
+        return `<tr style="cursor:pointer;" onclick="App.drillDownUser('${u.id}','${esc(u.username||u.email)}')">
+          <td>
+            <div style="font-weight:700;">${esc(u.username||u.email)}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim);">${esc(u.email)}</div>
+            ${u.is_superuser?'<span class="badge-admin">ADMIN</span>':''}
+          </td>
+          <td><span class="status-dot-inline ${u.is_active?'status-online':'status-offline'}"></span>${u.is_active?'Active':'Inactive'}</td>
+          <td>${u.session_count||0}</td>
+          <td>${scores.faithfulness!=null?Math.round(scores.faithfulness)+'%':'—'}</td>
+          <td onclick="event.stopPropagation()">
+            <button onclick="App._toggleUser('${u.id}',${u.is_active})" style="background:none;border:none;color:${u.is_active?'var(--error)':'var(--success)'};cursor:pointer;font-size:0.82rem;padding:5px 8px;border-radius:6px;">${u.is_active?'Deactivate':'Activate'}</button>
+            ${!u.is_superuser
+              ? `<button onclick="App._promoteUser('${u.id}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:0.82rem;padding:5px 8px;">Promote</button>`
+              : `<button onclick="App._demoteUser('${u.id}')" style="background:none;border:none;color:var(--warn);cursor:pointer;font-size:0.82rem;padding:5px 8px;">Demote</button>`}
+            ${!u.is_superuser
+              ? `<button onclick="App._deleteUser('${u.id}')" style="background:none;border:none;color:var(--error);cursor:pointer;font-size:0.82rem;padding:5px 8px;" title="Delete">🗑️</button>`
+              : ''}
+          </td>
+        </tr>`;
+      }).join('');
+    } catch(e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--error);padding:18px;">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  async _deleteUser(userId) {
+    this.showConfirmModal({
+      title: 'Delete User Permanently',
+      message: 'This will delete the user and all their data. Cannot be undone.',
+      type: 'danger',
+      action: async () => {
+        try { await apiFetch(`api/v1/admin/users/${userId}`, { method: 'DELETE' }); toast('User deleted', 'suc'); this.loadAdminUsers(); }
+        catch(e) { toast('Delete failed: '+e.message,'err'); }
+      }
+    });
+  },
+  async _toggleUser(id, isActive) {
+    try { await apiFetch(`api/v1/admin/users/${id}/${isActive?'deactivate':'activate'}`, { method: 'PATCH' }); toast(`User ${isActive?'deactivated':'activated'}`, 'suc'); this.loadAdminUsers(); }
+    catch(e) { toast(e.message,'err'); }
+  },
+  async _promoteUser(id) {
+    try { await apiFetch(`api/v1/admin/users/${id}/promote`, { method: 'PATCH' }); toast('User promoted to admin','suc'); this.loadAdminUsers(); }
+    catch(e) { toast(e.message,'err'); }
+  },
+  async _demoteUser(id) {
+    try { await apiFetch(`api/v1/admin/users/${id}/demote`, { method: 'PATCH' }); toast('User demoted','suc'); this.loadAdminUsers(); }
+    catch(e) { toast(e.message,'err'); }
+  },
+
+  async drillDownUser(userId, username) {
+    State._adminCurrentUserId = userId; State._adminCurrentUser = username;
+    document.getElementById('admin-users-list').classList.add('hidden');
+    document.getElementById('admin-session-detail').classList.add('hidden');
+    document.getElementById('admin-user-detail').classList.remove('hidden');
+    document.getElementById('admin-detail-title').textContent = `Sessions — ${username}`;
+    const tbody = document.getElementById('admin-table-sessions');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;"><span class="spinner"></span></td></tr>';
+    try {
+      const sessions = await apiFetch(`api/v1/admin/sessions?user_id=${userId}`);
+      if (!sessions || !sessions.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No sessions</td></tr>'; return; }
+      tbody.innerHTML = sessions.map(s =>
+        `<tr style="cursor:pointer;" onclick="App.drillDownSession('${s.id}','${esc(s.name)}')">
+          <td style="font-weight:700;">${esc(s.name)}</td>
+          <td>${s.message_count||0}</td>
+          <td>${s.document_count||0}</td>
+          <td><span style="color:${s.is_active?'var(--success)':'var(--text-dim)'}">● ${s.is_active?'Active':'Inactive'}</span></td>
+          <td>${new Date(s.created_at).toLocaleDateString()}</td>
+        </tr>`
+      ).join('');
+    } catch(e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--error);padding:18px;">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  async drillDownSession(sessionId, sessionName) {
+    document.getElementById('admin-user-detail').classList.add('hidden');
+    document.getElementById('admin-session-detail').classList.remove('hidden');
+    document.getElementById('admin-session-title').textContent = `Messages — ${sessionName}`;
+    const scoresEl = document.getElementById('admin-session-scores');
+    const tbody    = document.getElementById('admin-table-messages');
+    scoresEl.innerHTML = '';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;"><span class="spinner"></span></td></tr>';
+    try {
+      const [msgs, summary] = await Promise.all([
+        apiFetch(`api/v1/admin/messages?session_id=${sessionId}&page_size=100`),
+        apiFetch(`api/v1/sessions/${sessionId}/evaluation/summary`).catch(()=>null),
+      ]);
+      if (summary) {
+        scoresEl.innerHTML = [
+          {label:'Faithfulness', val:summary.avg_faithfulness},
+          {label:'Relevancy',    val:summary.avg_answer_relevancy},
+          {label:'Precision',    val:summary.avg_context_precision},
+          {label:'Recall',       val:summary.avg_context_recall},
+          {label:'Turns',        val:summary.total_evaluated, raw:true}
+        ].map(m=>
+          `<div class="stat-card" style="padding:12px;">
+            <span class="stat-val" style="font-size:1.2rem;">${m.raw?(m.val??'—'):(m.val!=null?Math.round(m.val)+'%':'—')}</span>
+            <span class="stat-label">${m.label}</span>
+          </div>`
+        ).join('');
+      }
+      if (!msgs || !msgs.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px;">No messages</td></tr>'; return; }
+      tbody.innerHTML = msgs.map(m=>
+        `<tr>
+          <td><span style="padding:2px 8px;border-radius:8px;font-size:0.72rem;font-weight:700;background:${m.role==='user'?'rgba(59,130,246,0.15)':'rgba(123,44,191,0.15)'};color:${m.role==='user'?'#3b82f6':'#b09aff'}">${m.role==='user'?'User':'AI'}</span></td>
+          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.content)}</td>
+          <td>${m.evaluation?.faithfulness!=null?Math.round(m.evaluation.faithfulness)+'%':'—'}</td>
+          <td>${m.evaluation?.answer_relevancy!=null?Math.round(m.evaluation.answer_relevancy)+'%':'—'}</td>
+          <td style="font-size:0.78rem;color:var(--text-dim);white-space:nowrap;">${new Date(m.created_at).toLocaleString()}</td>
+        </tr>`
+      ).join('');
+    } catch(e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--error);padding:18px;">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  backToUsers() {
+    document.getElementById('admin-user-detail').classList.add('hidden');
+    document.getElementById('admin-session-detail').classList.add('hidden');
+    document.getElementById('admin-users-list').classList.remove('hidden');
+  },
+  backToUserDetail() {
+    document.getElementById('admin-session-detail').classList.add('hidden');
+    document.getElementById('admin-user-detail').classList.remove('hidden');
+  },
+
+  // ── Sidebar ────────────────────────────────────────
+  toggleSidebar() {
+    const s = document.getElementById('sidebar');
+    const b = document.getElementById('sidebar-backdrop');
+    s.classList.toggle('open'); b.classList.toggle('open');
+  },
+  closeSidebar() {
+    if (window.innerWidth <= 900) {
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sidebar-backdrop').classList.remove('open');
+    }
+  },
+
+  // ── Theme ──────────────────────────────────────────
+  toggleTheme() {
+    const html = document.documentElement;
+    if (State.theme === 'dark') { html.setAttribute('data-theme','light'); document.getElementById('theme-text').textContent = 'Light'; State.theme = 'light'; }
+    else { html.removeAttribute('data-theme'); document.getElementById('theme-text').textContent = 'Dark'; State.theme = 'dark'; }
+    localStorage.setItem('tesseract_theme', State.theme);
+  },
+
+  // ── Server Status ──────────────────────────────────
+  _updateServerStatus() {
+    const dot  = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    const update = () => {
+      State.isOnline = navigator.onLine;
+      if (dot) { if (State.isOnline) dot.classList.remove('offline'); else dot.classList.add('offline'); }
+      if (text) text.textContent = State.isOnline ? 'Online' : 'Offline';
+      if (!State.isOnline) toast('Lost connection', 'warn');
+    };
+    window.addEventListener('online',  update);
+    window.addEventListener('offline', update);
+    update();
+    setInterval(async () => {
+      try {
+        await fetch(API_BASE + 'health', { method: 'GET', mode: 'no-cors' });
+        if (!State.isOnline) { State.isOnline = true; update(); toast('Connection restored', 'suc'); }
+      } catch {
+        if (State.isOnline) { State.isOnline = false; update(); }
+      }
+    }, 30000);
+  },
+};
+
+// ═══════════════════════════════════════════════════════
+// RESTORE SESSION
+// ═══════════════════════════════════════════════════════
+async function restoreSession() {
+  if (!State.token) return false;
+  try {
+    const me = await apiFetch('api/v1/auth/me');
+    if (me && me.id) {
+      State.user    = me;
+      State.isAdmin = me.is_superuser;
+      const authView = document.getElementById('auth-view');
+      if (authView) authView.classList.add('hidden');
+      if (typeof App?._afterLogin === 'function') App._afterLogin();
+      toast('Session restored ✨', 'suc');
+      return true;
+    }
+  } catch(e) {
+    console.warn('Session restore failed:', e.message);
+    if (State.refreshToken) {
+      const refreshed = await _tryRefreshToken();
+      if (refreshed) {
+        try {
+          const me2 = await apiFetch('api/v1/auth/me');
+          if (me2 && me2.id) {
+            State.user    = me2;
+            State.isAdmin = me2.is_superuser;
+            document.getElementById('auth-view')?.classList.add('hidden');
+            App._afterLogin();
+            toast('Session restored ✨', 'suc');
+            return true;
+          }
+        } catch {}
       }
     }
-    return false;
+    localStorage.removeItem('tesseract_token');
+    localStorage.removeItem('tesseract_refresh');
+  }
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════
+// DOM READY
+// ═══════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', async () => {
+  if (window.innerWidth <= 900) document.getElementById('mob-toggle').style.display = 'grid';
+
+  // Keyboard shortcuts
+  document.getElementById('login-pass')?.addEventListener('keydown',        e => { if (e.key === 'Enter') App.login(); });
+  document.getElementById('login-email')?.addEventListener('keydown',       e => { if (e.key === 'Enter') document.getElementById('login-pass')?.focus(); });
+  document.getElementById('reg-pass-confirm')?.addEventListener('keydown',  e => { if (e.key === 'Enter') App.register(); });
+  document.getElementById('chat-input')?.addEventListener('keydown',        e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); App.sendMessage(); } });
+  document.getElementById('new-session-name')?.addEventListener('keydown',  e => { if (e.key === 'Enter') App.createSession(); });
+
+  // Close more menu on outside click
+  document.addEventListener('click', e => {
+    const wrapper = document.getElementById('nav-more-wrapper');
+    if (wrapper && !wrapper.contains(e.target)) App.closeMoreMenu();
+  });
+
+  // Escape key
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document.getElementById('src-modal')?.classList.remove('open');
+      document.getElementById('session-modal')?.classList.remove('open');
+      App.closeOverlays(); App.closePanel(); App.closeConfirmModal();
+      App.closeSidebar(); App.closeMoreMenu();
+    }
+  });
+
+  // ── Browser Back / Forward ──
+  window.addEventListener('popstate', (e) => {
+    const state = e.state;
+    if (!state) { App.closeOverlays(); return; }
+
+    if (state.view === 'chat') {
+      App.closeOverlays();
+      // لو في session محدد في الـ state وهو مختلف عن الـ active — ارجعله
+      if (state.sessionId && state.sessionId !== State.activeSession?.id) {
+        App.selectSession(state.sessionId);
+      }
+    } else {
+      // افتح الـ overlay المناسب بدون ما تضيف history entry جديد
+      App._navigate(state.view, false);
+    }
+  });
+
+  // Restore session or show auth
+  const restored = await restoreSession();
+  const authView = document.getElementById('auth-view');
+  if (!restored) {
+    if (authView) authView.classList.remove('hidden');
+  } else {
+    if (authView) authView.classList.add('hidden');
+    // Set initial history state بعد الـ restore
+    history.replaceState({ view: 'chat' }, '', window.location.href);
   }
 
-  document.addEventListener('DOMContentLoaded', async () => {
-    if (window.innerWidth <= 900) document.getElementById('mob-toggle').style.display = 'grid';
-    document.getElementById('login-pass')?.addEventListener('keydown', e => { if (e.key === 'Enter') App.login(); });
-    document.getElementById('login-email')?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass')?.focus(); });
-    document.getElementById('reg-pass-confirm')?.addEventListener('keydown', e => { if (e.key === 'Enter') App.register(); });
-    document.getElementById('chat-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); App.sendMessage(); } });
-    document.getElementById('new-session-name')?.addEventListener('keydown', e => { if (e.key === 'Enter') App.createSession(); });
+  // Apply saved theme
+  if (State.theme === 'light') {
+    document.documentElement.setAttribute('data-theme','light');
+    document.getElementById('theme-text').textContent = 'Light';
+  }
 
-    document.addEventListener('click', e => {
-      const wrapper = document.getElementById('nav-more-wrapper');
-      if (wrapper && !wrapper.contains(e.target)) App.closeMoreMenu();
-    });
-
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') {
-        document.getElementById('src-modal')?.classList.remove('open');
-        document.getElementById('session-modal')?.classList.remove('open');
-        App.closeOverlays(); App.closePanel(); App.closeConfirmModal(); App.closeSidebar(); App.closeMoreMenu();
-      }
-    });
-
-    const restored = await restoreSession();
-    const authView = document.getElementById('auth-view');
-    if (!restored) { if (authView) authView.classList.remove('hidden'); }
-    else { if (authView) authView.classList.add('hidden'); }
-
-    if (State.theme === 'light') { document.documentElement.setAttribute('data-theme','light'); document.getElementById('theme-text').textContent = 'Light'; }
-
-    window.addEventListener('resize', () => { if (window.innerWidth > 900) App.closeSidebar(); });
-  });
+  window.addEventListener('resize', () => { if (window.innerWidth > 900) App.closeSidebar(); });
+});
   </script>
 </body>
 </html>
