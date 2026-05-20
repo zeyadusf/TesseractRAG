@@ -136,32 +136,20 @@ class AuthService(BaseService):
         )
 
     async def create_guest_user(self):
-        guest_id = uuid4()
-        guest_email = f"guest-{guest_id}@tesseract.ai.com"
-        guest_username = f"guest_{str(guest_id)[:8]}"
-
-
         try:
-            # Create guest user in database
-            # user: User = await self.db.users.create(
-            #     email=guest_email,
-            #     username=guest_username,
-            #     hashed_password=hash_password(str(guest_id)),  # Random hash, unused
-            #     is_active=True,
-            #     is_superuser=False,
-                
-            # )
-            _ = await self.register(RegisterInput(
+            guest_id = uuid4()
+            guest_email = f"guest-{guest_id}@tesseract.ai.com"
+            guest_username = f"guest_{str(guest_id)[:8]}"
+            guest_password = str(guest_id)
+
+            user = await self.db.users.create(
                 email=guest_email,
-                password=str(guest_id),
-                username=guest_username
-            ))
-            
-            return await self.login(LoginInput(
-                username=guest_email,
-                password=str(guest_id),
-                    )
-                )
+                username=guest_username,
+                hashed_password=hash_password(guest_password),
+            )
+            # issue tokens direct without login
+            tokens = self._issue_tokens(user.id)
+            return UserOut.model_validate(user), tokens
         except ConflictError:
             # Email/username collision (should be extremely rare)
             raise ConflictError("Failed to create guest user (collision). Try again.")
