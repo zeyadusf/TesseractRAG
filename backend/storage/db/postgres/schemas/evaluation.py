@@ -40,8 +40,16 @@ class Evaluation(SqlAlchemyBase):
     )
 
     # Relationships
-    message: Mapped["Message"] = relationship("Message", back_populates="evaluation") # type: ignore
-    session: Mapped["Session"] = relationship("Session", back_populates="evaluations") # type: ignore
+    message: Mapped["Message"] = relationship(  # type: ignore
+        "Message",
+        back_populates="evaluation",
+        passive_deletes=True,
+    )
+    session: Mapped["Session"] = relationship(  # type: ignore
+        "Session",
+        back_populates="evaluations",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         Index("idx_evaluations_message_id", "message_id"),

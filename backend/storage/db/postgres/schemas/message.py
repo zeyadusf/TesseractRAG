@@ -40,14 +40,17 @@ class Message(SqlAlchemyBase):
     )
 
     # Relationships
-    session: Mapped["Session"] = relationship("Session", back_populates="messages") # type: ignore
-    evaluation: Mapped[Optional["Evaluation"]] = relationship( # type: ignore
-        "Evaluation", back_populates="message", uselist=False
+    session: Mapped["Session"] = relationship("Session", back_populates="messages")  # type: ignore
+    evaluation: Mapped[Optional["Evaluation"]] = relationship(  # type: ignore
+        "Evaluation",
+        back_populates="message",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (
         CheckConstraint("role IN ('user', 'assistant', 'system')", name="ck_message_role"),
         Index("idx_messages_session_id", "session_id"),
-        Index("idx_messages_session_created", "session_id", "created_at"),  # for chat history ordering
-        Index("idx_messages_session_role", "session_id", "role"),            # for role filtering
+        Index("idx_messages_session_created", "session_id", "created_at"),
+        Index("idx_messages_session_role", "session_id", "role"),
     )
