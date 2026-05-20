@@ -296,7 +296,8 @@
       background: var(--success); animation: pulse 2s infinite;
       box-shadow: 0 0 8px var(--success);
     }
-    .status-dot.offline { background: var(--error); animation: none; }
+    .status-dot.offline { background: var(--error); animation: none; box-shadow: none; }
+    .status-dot.checking { background: var(--warn); animation: pulse 1s infinite; box-shadow: 0 0 8px var(--warn); }
     @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.9); } }
 
     .theme-toggle {
@@ -475,10 +476,9 @@
     .table-wrap { overflow-x: auto; border-radius: var(--radius); -webkit-overflow-scrolling: touch; }
     table { width: 100%; border-collapse: collapse; min-width: 480px; }
     th { text-align: left; padding: 12px 16px; font-size: 0.78rem; color: var(--text-dim); border-bottom: 2px solid var(--border); font-weight: 700; white-space: nowrap; }
-    
-    td { 
-      padding: 12px 16px; 
-      border-bottom: 1px solid var(--border); 
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
       font-size: 0.88rem;
       white-space: nowrap;
     }
@@ -489,7 +489,6 @@
       justify-content: center;
     }
     td > :last-child { margin-right: 0; }
-    
     tr:hover { background: var(--glass); }
 
     /* ─── AUTH ─── */
@@ -639,6 +638,29 @@
     .drop-zone p { font-size: 0.82rem; color: var(--text-dim); margin: 3px 0; }
     .drop-zone .file-types { font-size: 0.68rem; color: var(--text-dim); opacity: 0.8; }
 
+    /* ─── SCROLL TO BOTTOM BUTTON ─── */
+    #scroll-bottom-btn {
+      position: fixed;
+      bottom: 100px;
+      right: 24px;
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: var(--accent-grad);
+      border: none;
+      color: #000;
+      font-size: 1.2rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 18px rgba(0,240,255,0.35);
+      display: none;
+      place-items: center;
+      z-index: 60;
+      transition: var(--transition);
+      line-height: 1;
+    }
+    #scroll-bottom-btn:hover { transform: translateY(-2px) scale(1.08); box-shadow: 0 6px 24px rgba(0,240,255,0.5); }
+    #scroll-bottom-btn.visible { display: grid; animation: fadeIn 0.2s ease; }
+
     /* ─── MISC ─── */
     @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -667,23 +689,23 @@
     .copy-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
     .copy-btn.copied { background: var(--success); color: #fff; border-color: var(--success); }
 
-    #mob-toggle { 
-      display: none; 
-      background: var(--glass); 
-      border: 1px solid var(--border); 
-      color: var(--text); 
-      width: 38px; 
-      height: 38px; 
-      border-radius: 10px; 
-      font-size: 1.1rem; 
+    #mob-toggle {
+      display: none;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      font-size: 1.1rem;
       cursor: pointer;
-      transition: var(--transition); 
+      transition: var(--transition);
       flex-shrink: 0;
       align-items: center;
       justify-content: center;
       line-height: 1;
       padding: 0;
-      box-sizing: border-box; 
+      box-sizing: border-box;
     }
     #mob-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -708,6 +730,7 @@
       #mob-toggle { display: grid; }
       .strategy-wrapper { padding: 4px 8px; }
       .strategy-label { display: none; }
+      #scroll-bottom-btn { right: 14px; bottom: 90px; }
     }
 
     @media (max-width: 640px) {
@@ -786,7 +809,7 @@
           New here? <a href="#" style="color:var(--accent);text-decoration:none;font-weight:600;" onclick="App.toggleAuthMode('register');return false;">Create Account</a>
         </p>
       </div>
-      
+
       <div id="register-form" class="hidden">
         <div class="auth-msg-box">
           <div id="reg-error" class="auth-error"></div>
@@ -840,7 +863,7 @@
           </div>
           <span class="logo-text">TesseractRAG</span>
           <span style="font-size:0.6rem;color:var(--text-dim);border:1px solid var(--border);padding:1px 6px;border-radius:5px;margin-left:2px;">v2.0</span>
-          <span class="status-dot" id="status-dot">
+          <span class="status-dot" id="status-dot" title="Server status"></span>
         </div>
         <button class="new-session-btn" onclick="App.openNewSessionModal()">+ New Session</button>
       </div>
@@ -1042,7 +1065,7 @@
                 <div class="about-tech-title">🧩 Embeddings and Reranker</div>
                 <div class="about-tech-row"><span class="about-tech-dot purple"></span> Jina AI Embedder </div>
                 <div class="about-tech-row"><span class="about-tech-dot green"></span> EmbedDispatcher Router</div>
-                <div class="about-tech-row"><span class="about-tech-dot"></span>[Reranker] BAAI/bge-reranker-base (HF)</div>
+                <div class="about-tech-row"><span class="about-tech-dot"></span>[Reranker] BAAI/bge-reranker-v2-m3 (HF)</div>
               </div>
               <div class="about-tech-card">
                 <div class="about-tech-title">🚀 Backend</div>
@@ -1168,6 +1191,9 @@
     </div>
   </div>
 
+  <!-- SCROLL TO BOTTOM BUTTON -->
+  <button id="scroll-bottom-btn" onclick="App.scrollToBottom()" title="Scroll to bottom">↓</button>
+
   <div id="toast-container"></div>
 
   <script>
@@ -1194,38 +1220,24 @@ const State = {
 
 // ═══════════════════════════════════════════════════════
 // CACHE LAYER
-// in-memory cache with TTL — no Redis needed on frontend
 // ═══════════════════════════════════════════════════════
 const Cache = {
   _store: {},
-
-  set(key, value, ttlMs = 60_000) {
-    this._store[key] = { value, expiresAt: Date.now() + ttlMs };
+  set(key, value, ttlMs = 60_000) { 
+  this._store[key] = { value, expiresAt: Date.now() + ttlMs }; 
   },
-
   get(key) {
     const entry = this._store[key];
     if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
-      delete this._store[key];
-      return null;
-    }
+    if (Date.now() > entry.expiresAt) { 
+    delete this._store[key]; 
+    return null;
+  }
     return entry.value;
   },
-
-  invalidate(key) {
-    delete this._store[key];
-  },
-
-  invalidatePrefix(prefix) {
-    Object.keys(this._store)
-      .filter(k => k.startsWith(prefix))
-      .forEach(k => delete this._store[k]);
-  },
-
-  clear() {
-    this._store = {};
-  }
+  invalidate(key) { delete this._store[key]; },
+  invalidatePrefix(prefix) { Object.keys(this._store).filter(k => k.startsWith(prefix)).forEach(k => delete this._store[k]); },
+  clear() { this._store = {}; }
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1249,15 +1261,12 @@ async function _tryRefreshToken() {
     localStorage.setItem('tesseract_token', data.access_token);
     localStorage.setItem('tesseract_refresh', data.refresh_token);
     return true;
-  } catch {
-    return false;
-  } finally {
-    _isRefreshing = false;
-  }
+  } catch { return false; }
+  finally { _isRefreshing = false; }
 }
 
 // ═══════════════════════════════════════════════════════
-// API FETCH — with auto refresh on 401
+// API FETCH
 // ═══════════════════════════════════════════════════════
 async function apiFetch(path, opts = {}, retries = 3) {
   const url = API_BASE + path;
@@ -1270,36 +1279,25 @@ async function apiFetch(path, opts = {}, retries = 3) {
       const res = await fetch(url, {
         method: opts.method || 'GET',
         headers,
-        body: opts.formData
-          ? opts.formData
-          : opts.body
-            ? JSON.stringify(opts.body)
-            : undefined
+        body: opts.formData ? opts.formData : opts.body ? JSON.stringify(opts.body) : undefined
       });
 
       if (res.status === 204) return null;
 
-      // ── 401: جرب refresh الأول قبل ما تعمل logout ──
       if (res.status === 401 && !_isRefreshing) {
         const refreshed = await _tryRefreshToken();
         if (refreshed) {
-          // عدّل الـ header وعيد الـ request
           headers['Authorization'] = `Bearer ${State.token}`;
           const retry = await fetch(url, {
             method: opts.method || 'GET',
             headers,
-            body: opts.formData
-              ? opts.formData
-              : opts.body
-                ? JSON.stringify(opts.body)
-                : undefined
+            body: opts.formData ? opts.formData : opts.body ? JSON.stringify(opts.body) : undefined
           });
           if (retry.status === 204) return null;
           const retryData = await retry.json().catch(() => ({}));
           if (!retry.ok) throw new Error(retryData.detail || `Error ${retry.status}`);
           return retryData;
         } else {
-          // الـ refresh فشل — logout
           App.logout();
           throw new Error('Session expired');
         }
@@ -1308,7 +1306,6 @@ async function apiFetch(path, opts = {}, retries = 3) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
       return data;
-
     } catch (e) {
       if (attempt === retries) throw e;
       if (e.message.includes('expired') || e.message.includes('Session expired')) throw e;
@@ -1369,6 +1366,24 @@ const AI_AVATAR_SVG = `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3
 // APP
 // ═══════════════════════════════════════════════════════
 const App = {
+
+  // ── Scroll to Bottom ──────────────────────────────
+  scrollToBottom(instant = false) {
+    const c = document.getElementById('chat-history');
+    if (!c) return;
+    c.scrollTo({ top: c.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
+  },
+
+  // Attach scroll watcher to chat container — call once after DOM ready
+  _initScrollWatcher() {
+    const c   = document.getElementById('chat-history');
+    const btn = document.getElementById('scroll-bottom-btn');
+    if (!c || !btn) return;
+    c.addEventListener('scroll', () => {
+      const distFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+      btn.classList.toggle('visible', distFromBottom > 120);
+    });
+  },
 
   // ── Confirm Modal ──────────────────────────────────
   showConfirmModal({ title = 'Confirm Action', message = 'Are you sure?', type = 'warning', action = null }) {
@@ -1486,7 +1501,6 @@ const App = {
     this.loadSessions();
     this._updateServerStatus();
     this._showWelcome();
-    // push initial history state
     history.replaceState({ view: 'chat' }, '', window.location.href);
   },
 
@@ -1565,7 +1579,7 @@ const App = {
     State.token = null; State.refreshToken = null;
     State.user  = null; State.sessions = [];
     State.activeSession = null;
-    Cache.clear(); // امسح كل الـ cache عند logout
+    Cache.clear();
     document.getElementById('auth-view').classList.remove('hidden');
     document.getElementById('login-pass').value = '';
     document.getElementById('auth-error').style.display = 'none';
@@ -1595,25 +1609,19 @@ const App = {
     }
   },
 
-  // ── Load Sessions — with Cache ─────────────────────
+  // ── Load Sessions ──────────────────────────────────
   async loadSessions(forceRefresh = false) {
     const cacheKey = 'sessions_list';
     if (!forceRefresh) {
       const cached = Cache.get(cacheKey);
-      if (cached) {
-        State.sessions = cached;
-        this._renderSessionList();
-        return;
-      }
+      if (cached) { State.sessions = cached; this._renderSessionList(); return; }
     }
     try {
       const data     = await apiFetch('api/v1/sessions');
       State.sessions = data || [];
-      Cache.set(cacheKey, State.sessions, 60_000); // cache دقيقة
+      Cache.set(cacheKey, State.sessions, 60_000);
       this._renderSessionList();
-    } catch(e) {
-      console.error('loadSessions', e);
-    }
+    } catch(e) { console.error('loadSessions', e); }
   },
 
   // ── Render Session List ────────────────────────────
@@ -1648,7 +1656,7 @@ const App = {
       action: async () => {
         try {
           await apiFetch(`api/v1/sessions/${id}`, { method: 'DELETE' });
-          Cache.invalidate('sessions_list');     // امسح الـ cache
+          Cache.invalidate('sessions_list');
           Cache.invalidate('user_dashboard');
           toast('Session deleted', 'suc');
           if (State.activeSession?.id === id) {
@@ -1681,7 +1689,7 @@ const App = {
     if (!name) { errEl.textContent = 'Session name is required'; errEl.style.display = 'block'; return; }
     try {
       const s = await apiFetch('api/v1/sessions', { method: 'POST', body: { name, description: desc || null } });
-      Cache.invalidate('sessions_list');   // امسح الـ cache عشان تتجيب الـ list الجديدة
+      Cache.invalidate('sessions_list');
       Cache.invalidate('user_dashboard');
       State.sessions.unshift(s);
       document.getElementById('session-modal').classList.remove('open');
@@ -1704,7 +1712,6 @@ const App = {
     document.getElementById('session-hint').textContent = 'Active: ' + s.name;
     this.closeOverlays();
     this.closeSidebar();
-    // push للـ browser history
     history.pushState({ view: 'chat', sessionId: id }, '', `#session-${id}`);
     await this._loadChatHistory();
     if (State.activePanel) this._renderPanelContent(State.activePanel);
@@ -1726,7 +1733,8 @@ const App = {
         if (t.role === 'system') return;
         this._appendMessageEl(t.role === 'user' ? 'user' : 'ai', t.content, t.source_chunks || [], t.retrieval_strategy, t.latency_ms);
       });
-      container.scrollTop = container.scrollHeight;
+      // Instant scroll to bottom when loading history
+      App.scrollToBottom(true);
     } catch(e) {
       container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--error);">${esc(e.message)}</div>`;
     }
@@ -1740,11 +1748,13 @@ const App = {
     const q        = inp.value.trim();
     if (!q) return;
     inp.value = '';
-    const strategy = document.getElementById('retrieval-strategy').value;
+    const strategy  = document.getElementById('retrieval-strategy').value;
     const container = document.getElementById('chat-history');
     const welcome   = container.querySelector('.chat-welcome');
     if (welcome) welcome.remove();
     this._appendMessageEl('user', q);
+    // Scroll to show the user message
+    App.scrollToBottom();
     State.streaming = true;
     document.getElementById('send-btn').disabled = true;
     document.getElementById('streaming-status').innerHTML = '<span class="spinner"></span> Thinking…';
@@ -1756,7 +1766,7 @@ const App = {
       <div class="msg-avatar ai-av">${AI_AVATAR_SVG}</div>
       <div class="msg ai"><span style="opacity:.5;font-size:0.88rem;">● &nbsp;● &nbsp;●</span></div>`;
     container.appendChild(tw);
-    container.scrollTop = container.scrollHeight;
+    App.scrollToBottom();
 
     try {
       const resp = await apiFetch(`api/v1/sessions/${State.activeSession.id}/chat`, {
@@ -1765,17 +1775,18 @@ const App = {
       });
       document.getElementById(typingId)?.remove();
       this._appendMessageEl('ai', resp.answer, resp.sources || [], resp.strategy_used, resp.total_latency_ms);
-      // بدّل الـ session cache عشان message_count اتغير
       if (State.activeSession) {
         State.activeSession.message_count = (State.activeSession.message_count || 0) + 2;
         Cache.invalidate('sessions_list');
         Cache.invalidate('user_dashboard');
         this._renderSessionList();
       }
-      container.scrollTop = container.scrollHeight;
+      // Smooth scroll to new AI message
+      App.scrollToBottom();
     } catch(e) {
       document.getElementById(typingId)?.remove();
       this._appendMessageEl('ai', '⚠️ ' + e.message);
+      App.scrollToBottom();
     } finally {
       State.streaming = false;
       document.getElementById('send-btn').disabled = false;
@@ -2109,7 +2120,6 @@ const App = {
   },
 
   // ── Views / Navigation ─────────────────────────────
-  // استخدم _navigate لكل الـ views عشان الـ history يشتغل
   _navigate(viewId, pushState = true) {
     this.closeOverlays();
     if (viewId === 'chat') {
@@ -2124,26 +2134,21 @@ const App = {
     if (viewId === 'admin-dashboard') this._loadAdminDashboard();
   },
 
-  showView(viewId) {
-    this._navigate(viewId);
-  },
+  showView(viewId) { this._navigate(viewId); },
 
   closeOverlays() {
     document.querySelectorAll('.overlay-view').forEach(v => v.classList.remove('active'));
   },
 
-  // ── User Dashboard — with Cache ────────────────────
+  // ── User Dashboard ─────────────────────────────────
   async _loadUserDashboard() {
     const cacheKey = 'user_dashboard';
     const cached   = Cache.get(cacheKey);
-    if (cached) {
-      this._renderDashboardData(cached);
-      return;
-    }
+    if (cached) { this._renderDashboardData(cached); return; }
     try {
       const sessions = await apiFetch('api/v1/sessions');
       State.sessions = sessions || [];
-      Cache.set(cacheKey, sessions, 120_000); // cache دقيقتين
+      Cache.set(cacheKey, sessions, 120_000);
       this._renderDashboardData(sessions);
       this._renderSessionList();
     } catch(e) { toast(e.message, 'err'); }
@@ -2342,27 +2347,59 @@ const App = {
     localStorage.setItem('tesseract_theme', State.theme);
   },
 
-  // ── Server Status ──────────────────────────────────
+  // ── Server Status (backend health check) ──────────
   _updateServerStatus() {
-    const dot  = document.getElementById('status-dot');
-    const text = document.getElementById('status-text');
-    const update = () => {
-      State.isOnline = navigator.onLine;
-      if (dot) { if (State.isOnline) dot.classList.remove('offline'); else dot.classList.add('offline'); }
-      if (text) text.textContent = State.isOnline ? 'Online' : 'Offline';
-      if (!State.isOnline) toast('Lost connection', 'warn');
+    const dot = document.getElementById('status-dot');
+
+    // Mark dot state
+    const setDot = (state) => {
+      if (!dot) return;
+      dot.classList.remove('offline', 'checking');
+      if (state === 'offline') dot.classList.add('offline');
+      else if (state === 'checking') dot.classList.add('checking');
+      // 'online' = default green pulse, no extra class
     };
-    window.addEventListener('online',  update);
-    window.addEventListener('offline', update);
-    update();
-    setInterval(async () => {
+
+    const checkBackend = async () => {
+      setDot('checking');
       try {
-        await fetch(API_BASE + 'health', { method: 'GET', mode: 'no-cors' });
-        if (!State.isOnline) { State.isOnline = true; update(); toast('Connection restored', 'suc'); }
-      } catch {
-        if (State.isOnline) { State.isOnline = false; update(); }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(API_BASE + 'health', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+        const wasOnline = State.isOnline;
+        State.isOnline = res.ok;
+        setDot(State.isOnline ? 'online' : 'offline');
+        dot.title = State.isOnline
+          ? 'Server online'
+          : `Server returned ${res.status}`;
+        if (!wasOnline && State.isOnline) toast('Server is back online ✅', 'suc');
+        if (wasOnline && !State.isOnline) toast('Server unreachable ⚠️', 'warn');
+      } catch (err) {
+        const wasOnline = State.isOnline;
+        State.isOnline = false;
+        setDot('offline');
+        dot.title = 'Server unreachable';
+        if (wasOnline) toast('Server unreachable ⚠️', 'warn');
       }
-    }, 30000);
+    };
+
+    // Run immediately, then every 30 s
+    checkBackend();
+    setInterval(checkBackend, 30_000);
+
+    // Browser-level connectivity as a secondary signal
+    window.addEventListener('offline', () => {
+      State.isOnline = false;
+      setDot('offline');
+      dot.title = 'No network connection';
+      toast('Lost connection', 'warn');
+    });
+    window.addEventListener('online', () => checkBackend());
   },
 };
 
@@ -2412,6 +2449,9 @@ async function restoreSession() {
 document.addEventListener('DOMContentLoaded', async () => {
   if (window.innerWidth <= 900) document.getElementById('mob-toggle').style.display = 'grid';
 
+  // Init scroll watcher
+  App._initScrollWatcher();
+
   // Keyboard shortcuts
   document.getElementById('login-pass')?.addEventListener('keydown',        e => { if (e.key === 'Enter') App.login(); });
   document.getElementById('login-email')?.addEventListener('keydown',       e => { if (e.key === 'Enter') document.getElementById('login-pass')?.focus(); });
@@ -2435,19 +2475,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ── Browser Back / Forward ──
+  // Browser Back / Forward
   window.addEventListener('popstate', (e) => {
     const state = e.state;
     if (!state) { App.closeOverlays(); return; }
-
     if (state.view === 'chat') {
       App.closeOverlays();
-      // لو في session محدد في الـ state وهو مختلف عن الـ active — ارجعله
       if (state.sessionId && state.sessionId !== State.activeSession?.id) {
         App.selectSession(state.sessionId);
       }
     } else {
-      // افتح الـ overlay المناسب بدون ما تضيف history entry جديد
       App._navigate(state.view, false);
     }
   });
@@ -2459,7 +2496,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (authView) authView.classList.remove('hidden');
   } else {
     if (authView) authView.classList.add('hidden');
-    // Set initial history state بعد الـ restore
     history.replaceState({ view: 'chat' }, '', window.location.href);
   }
 
