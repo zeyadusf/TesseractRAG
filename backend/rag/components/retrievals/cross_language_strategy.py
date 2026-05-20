@@ -27,7 +27,7 @@ class CrossLanguageStrategySelector:
         self.confidence_threshold = language_confidence_threshold
         self.enabled = enabled
     
-    def should_force_hybrid(self, query: str, chunks: List[Dict]) -> bool:
+    def should_force_semantic(self, query: str, chunks: List[Dict]) -> bool:
         """
         Return True if query language differs from majority language of chunks.
         
@@ -71,7 +71,7 @@ class CrossLanguageStrategySelector:
             logger.info(
                 f"[CROSS-LANG] Language mismatch detected: "
                 f"query='{query_lang}' vs chunks='{majority_lang}' (confidence={majority_ratio:.2f}). "
-                f"Forcing 'hybrid' strategy."
+                f"Forcing 'semantic' strategy."
             )
             return True
         

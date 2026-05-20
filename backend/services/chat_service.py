@@ -25,6 +25,7 @@ from backend.models.chat import (
 from backend.models.enums.retrieval_strategy import RetrievalStrategy
 from backend.rag.pipelines.retrieval_pipeline import RetrievalPipeline
 from backend.rag.components.embedding.embed_dispatcher import EmbedderDispatcher
+from backend.rag.components.query_rewrite.query_dispatcher import QueryRewriteDispatcher
 from backend.storage.vector_db.vec_dispatcher import get_vector_store
 from backend.rag.components.retrievals.cross_language_strategy import (
     get_cross_language_selector,
@@ -32,7 +33,6 @@ from backend.rag.components.retrievals.cross_language_strategy import (
 
 logger = get_logger(__name__)
 config = get_config()
-
 
 
 class ChatService(BaseService):
@@ -43,12 +43,14 @@ class ChatService(BaseService):
         embedder: Optional[EmbedderDispatcher] = None,
         retrieval_pipeline: Optional[RetrievalPipeline] = None,
         generation_pipeline: Optional[GenerationPipeline] = None,
+        query_rewriter: Optional[QueryRewriteDispatcher] = None,
     ) -> None:
         super().__init__(db)
         self._session = session
         self._embedder = embedder or EmbedderDispatcher()
         self._retrieval = retrieval_pipeline or RetrievalPipeline()
-        self._generation = generation_pipeline or GenerationPipeline()
+        self._generation = generation_pipeline or GenerationPipeline(enable_rewrite=False)
+        self._query_rewriter = query_rewriter or QueryRewriteDispatcher()
 
         self._llm_model = config.DEFAULT_GENERATOR_PROVIDER
         self._embedding_model = config.DEFAULT_EMBED
@@ -80,19 +82,18 @@ class ChatService(BaseService):
         # ── 1.5 Fetch last N turns for history context ─────────────────────────
         all_messages = await self.db.messages.list_by_session(
             session_id=session_id,
-            limit=config.HISTORY_TURNS * 2 + 1, 
+            limit=config.HISTORY_TURNS * 2 + 1,
             offset=0,
         )
 
         history_messages: List[Dict[str, str]] = []
         for msg in all_messages:
             if str(msg.id) == str(message.id):
-                continue  
+                continue
             history_messages.append({
-                "role": msg.role,        
+                "role": msg.role,
                 "content": msg.content,
             })
-
         history_messages = history_messages[-(config.HISTORY_TURNS * 2):]
 
         logger.info(
@@ -100,10 +101,24 @@ class ChatService(BaseService):
             f"| messages={len(history_messages)}"
         )
 
-        # ── 2. Embed query ─────────────────────────────────────────────────────
-        query_vector = await self._embedder.embed_query(request.question)
+        # ── 2. Query Rewrite ───────────────────────────────────────────────────
+        rewrite_result = await self._query_rewriter.rewrite_and_expand(
+            request.question,
+            history=history_messages,
+        )
+        rewritten_query = rewrite_result["rewritten"] or request.question
+        expanded_query  = rewrite_result["expanded"]  or request.question
 
-        # ── 3. Fetch candidate chunks ──────────────────────────────────────────
+        logger.info(
+            f"[REWRITE] original='{request.question}' "
+            f"| rewritten='{rewritten_query}' "
+            f"| expanded='{expanded_query}'"
+        )
+
+        # ── 3. Embed rewritten query ───────────────────────────────────────────
+        query_vector = await self._embedder.embed_query(expanded_query)
+
+        # ── 4. Fetch candidate chunks ──────────────────────────────────────────
         retrieval_start = time.perf_counter()
 
         raw_chunks = await self.db.chunks.list_by_session(session_id=session_id)
@@ -120,7 +135,7 @@ class ChatService(BaseService):
             for c in raw_chunks
         ]
 
-        # ── 4. Vector search ───────────────────────────────────────────────────
+        # ── 5. Vector search ───────────────────────────────────────────────────
         vector_store = get_vector_store(session=self._session)
 
         vector_results: List[Dict] = await vector_store.search(
@@ -134,13 +149,13 @@ class ChatService(BaseService):
         effective_strategy = request.strategy
         cross_lang_selector = get_cross_language_selector()
 
-        if cross_lang_selector.should_force_hybrid(request.question, chunks):
-            if request.strategy != RetrievalStrategy.HYBRID:
+        if cross_lang_selector.should_force_semantic(request.question, chunks):
+            if request.strategy != RetrievalStrategy.SEMANTIC:
                 logger.info(
                     f"[STRATEGY] Cross-language override: "
-                    f"'{request.strategy}' → 'hybrid' for query: {request.question[:50]}..."
+                    f"'{request.strategy}' → 'semantic' for query: {request.question[:50]}..."
                 )
-            effective_strategy = RetrievalStrategy.HYBRID
+            effective_strategy = RetrievalStrategy.SEMANTIC
 
         retrieval_latency_ms = int((time.perf_counter() - retrieval_start) * 1000)
         logger.info(
@@ -149,9 +164,9 @@ class ChatService(BaseService):
             f"| latency={retrieval_latency_ms}ms"
         )
 
-        # ── 5. Retrieval pipeline ──────────────────────────────────────────────
+        # ── 6. Retrieval pipeline ──────────────────────────────────────────────
         ranked_chunks: List[Dict] = await self._retrieval.run(
-            query=request.question,
+            query=rewritten_query,
             query_vector=query_vector,
             chunks=chunks,
             vector_results=vector_results,
@@ -176,7 +191,7 @@ class ChatService(BaseService):
                 ),
             })
 
-        # ── 6. Generation pipeline ─────────────────────────────────────────────
+        # ── 7. Generation pipeline ─────────────────────────────────────────────
         gen_output = await self._generation.run(
             GenerationInput(
                 original_query=request.question,
@@ -184,11 +199,11 @@ class ChatService(BaseService):
                 chunks=normalized_chunks,
                 vector_results=vector_results,
                 strategy=effective_strategy,
-                history=history_messages,  # ← NEW: بنمرر الـ history هنا
+                history=history_messages,
             )
         )
 
-        # ── 7. Persist assistant message ───────────────────────────────────────
+        # ── 8. Persist assistant message ───────────────────────────────────────
         source_chunks_for_db = [
             {
                 "chunk_id":    str(c.get("chunk_id", "")),
@@ -212,7 +227,7 @@ class ChatService(BaseService):
         )
         await self.db.session.commit()
 
-        # ── 8. Map → ChatResponse ──────────────────────────────────────────────
+        # ── 9. Map → ChatResponse ──────────────────────────────────────────────
         chunks_lookup = {
             int(c.get("chunk_index", -1)): c
             for c in normalized_chunks
@@ -233,6 +248,7 @@ class ChatService(BaseService):
     async def aclose(self) -> None:
         await self._generation.aclose()
         await self._retrieval.aclose()
+        await self._query_rewriter.aclose()
         logger.info("[CHAT] ChatService closed")
 
     # ── History / turn helpers ─────────────────────────────────────────────────

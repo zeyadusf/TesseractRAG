@@ -104,21 +104,26 @@ class HuggingFaceGenerator(AnswerGeneratorBase):
         sources: list[dict] | None = None,
         history: List[Dict[str, str]] | None = None,
     ) -> str:
-        if not context or not context.strip():
-            return "I don't have enough information to answer this question."
 
-        # Context is already formatted by ContextBuilder with [Source N]
-        prompt = RAGGeneratorPrompt.BASE.format(
+        system_content = RAGGeneratorPrompt.BASE_SYSTEM.value
+
+        # ── 2. User message ──────────────────────────────────────────────────
+        has_context = bool(context and context.strip())
+
+        user_content = RAGGeneratorPrompt.BASE_USER.value.format(
             question=question.strip(),
-            context=context
+            context=context if has_context else "No documents available for this query.",
         )
 
-        # ── Build messages with history ─────────────────
-        messages: List[Dict[str, str]] = []
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system_content}
+        ]
+
         if history:
             messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
-        # ────────────────────────────────────────────────
+
+        messages.append({"role": "user", "content": user_content})
+        # ─────────────────────────────────────────────────────────────────────
 
         try:
             # Low temperature for factual answers

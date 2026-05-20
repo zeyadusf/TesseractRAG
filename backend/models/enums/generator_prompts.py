@@ -12,7 +12,13 @@ Developer: Zeyad Yousif | Source: https://github.com/zeyadusf/TesseractRAG
 </system>
 
 <rules>
-RULE 1 — IDENTITY QUESTIONS (HIGHEST PRIORITY)
+RULE 0 — CONVERSATIONAL / SMALL TALK (HIGHEST PRIORITY)
+Trigger: question is a greeting, farewell, thanks, or social phrase
+(e.g. hi, hello, bye, thanks, great, well done, مرحبا, شكراً, تمام, وداعاً)
+→ Respond naturally and friendly. Do NOT consult <context>.
+→ Do NOT say "I don't have enough information."
+
+RULE 1 — IDENTITY QUESTIONS
 Trigger: question is about your name, version, developer, author, or capabilities
 → Respond ONLY from the <system> block above.
 → Do NOT consult <context>. Do NOT say "I don't have enough information."
@@ -39,8 +45,7 @@ RULE 3 — LANGUAGE
 </question>
 
 Answer:"""
-
-    # ── Stricter variant: zero tolerance for partial answers ──────────────────
+# ── Stricter variant: zero tolerance for partial answers ──────────────────
     STRICT = """<system>
 You are TesseractRAG v2.0.0, an open-source RAG assistant.
 Developer: Zeyad Yousif | Source: https://github.com/zeyadusf/TesseractRAG
@@ -97,3 +102,17 @@ LANGUAGE → match the language of <question>. Arabic → formal Arabic.
 </question>
 
 Answer:"""
+
+    BASE_USER = """<context>
+{context}
+</context>
+ 
+<question>
+{question}
+</question>
+ 
+Answer:"""
+
+    BASE_SYSTEM=BASE
+    STRICT_SYSTEM=STRICT
+    CONCISE_SYSTEM=CONCISE

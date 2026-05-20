@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 from backend.core.config import  get_config
 from backend.core.logger import  get_logger
 from .generator_base import AnswerGeneratorBase
+from .groq_generator import get_groq_generator, GroqRateLimitError
 from .groq_generator import get_groq_generator
 from .hf_generator import get_hf_generator
 
@@ -91,18 +92,27 @@ class SmartGeneratorGuard(AnswerGeneratorBase):
 
         try:
             if strategy == "groq":
-                answer = await self._groq.generate(question, context, sources,history)
+                answer = await self._groq.generate(question, context, sources, history)
                 await self._record_groq_request()
                 return answer
             else:
-                return await self._hf.generate(question, context, sources,history)
+                return await self._hf.generate(question, context, sources, history)
+
+        except GroqRateLimitError as rate_exc:
+            # Groq rate limited — switch to HF immediately, no waiting
+            logger.warning(f"Groq rate limited ({rate_exc}). Falling back to HF immediately.")
+            try:
+                return await self._hf.generate(question, context, sources, history)
+            except Exception as hf_exc:
+                logger.error(f"HF fallback also failed: {hf_exc}")
+                return "Sorry, I'm having trouble generating an answer right now. Please try again later."
 
         except Exception as primary_exc:
             logger.warning(f"{strategy.upper()} failed: {primary_exc}. Trying fallback...")
 
             fallback = self._hf if strategy == "groq" else self._groq
             try:
-                answer = await fallback.generate(question, context, sources)
+                answer = await fallback.generate(question, context, sources, history)
                 if strategy == "groq":
                     await self._record_groq_request()
                 return answer
