@@ -12,6 +12,7 @@ from backend.core.limiter import limiter
 from backend.core import get_logger, get_config
 from backend.core.dependencies import (aclose_evaluator,aclose_generation_pipeline,aclose_retrieval_pipeline,aclose_embedder,get_async_session)
 from backend.core.security.seed_superuser import seed_superuser
+from backend.rag.components.reranker.bge_hf import get_reranker
 from backend.models.healthStatus import HealthStatus
 from backend.api.v1 import auth, chat, documents, evaluation, sessions, admin
 from backend.services.exceptions import *
@@ -29,6 +30,7 @@ async def lifespan(app:FastAPI):
     # app.state.db_engine = engine
     async for session in get_async_session():
         await seed_superuser(session)
+    await get_reranker().warmup()
     yield
     # ── SHUTDOWN ─────────────────────────────────────
     logger.info("TesseractRAG shutting down...")
