@@ -805,9 +805,8 @@ The engineering concepts v2 forced me to confront — beyond what v1 taught:
 
 ## Related Repositories
 
-<div align="center">
 
 **[`Semantic Search and RAG`](https://github.com/zeyadusf/Semantic_Search_and_RAG)**  
 **[`LLMs from Scratch`](https://github.com/zeyadusf/LLMs-from-Scratch)**
 
-</div>
+
