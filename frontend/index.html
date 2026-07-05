@@ -661,6 +661,7 @@
     #scroll-bottom-btn:hover { transform: translateY(-2px) scale(1.08); box-shadow: 0 6px 24px rgba(0,240,255,0.5); }
     #scroll-bottom-btn.visible { display: grid; animation: fadeIn 0.2s ease; }
 
+
     /* ─── MISC ─── */
     @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -768,6 +769,8 @@
       background: rgba(0,0,0,0.5); z-index: 99;
     }
     .sidebar-backdrop.open { display: block; }
+    .projects-card{ background:#161b27; border:1px solid rgba(255,255,255,0.06); border-radius:16px; padding:18px; } .projects-title{ font-size:15px; font-weight:600; margin:0 0 16px; color:#fff; } .project-item{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:1px solid rgba(255,255,255,0.06); } .project-item:last-child{ border-bottom:none; padding-bottom:0; } .project-left{ min-width:0; } .project-link{ display:flex; align-items:center; gap:10px; text-decoration:none; } .project-icon{ width:16px; height:16px; color:#00f0ff; flex-shrink:0; } .project-name{ font-size:14px; font-weight:500; background:linear-gradient(135deg,#00f0ff,#7b2cbf); background-clip:text; -webkit-background-clip:text; color:transparent; -webkit-text-fill-color:transparent; } .project-meta{ display:flex; align-items:center; gap:10px; flex-shrink:0; } .project-version{ font-size:12px; color:#cbd5e1; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.06); } .project-license{ font-size:12px; color:#00f0ff; }
+
   </style>
 </head>
 <body>
@@ -1097,6 +1100,32 @@
           </div>
 
         </div>
+         <div class="about-view-card" style="margin-bottom:0;margin-top: 15px;">
+    <h3 class="brand-name">Tesseract Projects</h3> 
+    <div class="projects-card">
+  <div class="project-item"> 
+    <div class="project-left"> 
+      <a href="https://tesseractrag.ziayd-usf.workers.dev/" class="project-link">
+        <svg class="project-icon" viewBox="0 0 24 24" fill="none"> <path d="M14 3H21V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> <path d="M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> <path d="M21 14V19C21 20.1046 20.1046 21 19 21H5C3.89543 21 3 20.1046 3 19V5C3 3.89543 3.89543 3 5 3H10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> </svg> 
+        <span class="project-name">TesseractRag</span> </a> </div>
+          <div class="project-meta">
+          <span class="project-version">v2.0</span> 
+          <span class="project-license">MIT License</span>
+        </div>
+      </div>
+      <div class="project-item"> 
+        <div class="project-left"> 
+          <a href="https://tesseractresearch.ziayd-usf.workers.dev/" class="project-link"> <svg class="project-icon" viewBox="0 0 24 24" fill="none"> <path d="M14 3H21V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> <path d="M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> <path d="M21 14V19C21 20.1046 20.1046 21 19 21H5C3.89543 21 3 20.1046 3 19V5C3 3.89543 3 3 5 3H10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> </svg> 
+            <span class="project-name">TesseractResearch</span> 
+          </a> 
+        </div> 
+        <div class="project-meta"> 
+          <span class="project-version">v1.0</span> 
+          <span class="project-license">MIT License</span> 
+        </div> 
+      </div> 
+    </div>
+
       </div>
 
       <!-- ADMIN DASHBOARD -->
